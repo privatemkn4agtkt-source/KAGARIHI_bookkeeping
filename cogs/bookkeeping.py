@@ -1,13 +1,10 @@
-import os
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import date
 import database as db
 
-ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID", "0"))
-WARN_PERCENT = 70   # 警告閾値 (%)
-CRIT_PERCENT = 90   # 危険閾値 (%)
+CRIT_PERCENT = 90   # 月初自動警告の閾値 (%)
 
 
 def fmt_amount(n: int) -> str:
@@ -19,7 +16,7 @@ def _storage_embed(info: dict) -> discord.Embed:
     if pct >= CRIT_PERCENT:
         color = discord.Color.red()
         title = "🚨 ストレージ警告: 残り僅か"
-    elif pct >= WARN_PERCENT:
+    elif pct >= 70:
         color = discord.Color.orange()
         title = "⚠️ ストレージ警告: 残量少"
     else:
@@ -45,51 +42,67 @@ def _storage_embed(info: dict) -> discord.Embed:
 class Bookkeeping(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self._last_alert_level = 0  # 0=正常, 1=警告, 2=危険
+        self._alerted_month: tuple[int, int] | None = None  # (year, month)
 
     def cog_load(self):
-        self.storage_check.start()
+        self.monthly_storage_check.start()
 
     def cog_unload(self):
-        self.storage_check.cancel()
+        self.monthly_storage_check.cancel()
 
-    @tasks.loop(hours=1)
-    async def storage_check(self):
-        if not ALERT_CHANNEL_ID:
+    # -------------------------------------------------------------------------
+    # 月初ストレージ監視タスク（90%超で全ギルドに通知）
+    # -------------------------------------------------------------------------
+    @tasks.loop(hours=24)
+    async def monthly_storage_check(self):
+        today = date.today()
+        if today.day != 1:
             return
-        channel = self.bot.get_channel(ALERT_CHANNEL_ID)
-        if channel is None:
-            return
+        ym = (today.year, today.month)
+        if self._alerted_month == ym:
+            return  # 今月はすでに通知済み
         info = await db.get_storage_info()
-        pct = info["disk_percent"]
+        if info["disk_percent"] < CRIT_PERCENT:
+            return
+        embed = _storage_embed(info)
+        for guild in self.bot.guilds:
+            channel = guild.system_channel or next(
+                (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages),
+                None,
+            )
+            if channel:
+                await channel.send(embed=embed)
+        self._alerted_month = ym
 
-        level = 0
-        if pct >= CRIT_PERCENT:
-            level = 2
-        elif pct >= WARN_PERCENT:
-            level = 1
-
-        # 前回より状況が悪化した時だけ通知
-        if level > self._last_alert_level:
-            embed = _storage_embed(info)
-            await channel.send(embed=embed)
-        self._last_alert_level = level
-
-    @storage_check.before_loop
-    async def before_storage_check(self):
+    @monthly_storage_check.before_loop
+    async def before_monthly_storage_check(self):
         await self.bot.wait_until_ready()
+
+    # -------------------------------------------------------------------------
+    # 勘定科目オートコンプリート
+    # -------------------------------------------------------------------------
+    async def _account_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        accounts = await db.get_accounts()
+        return [
+            app_commands.Choice(name=a["name"], value=a["name"])
+            for a in accounts
+            if current.lower() in a["name"].lower()
+        ][:25]
 
     # -------------------------------------------------------------------------
     # /仕訳  借方 貸方 金額 摘要 [日付]
     # -------------------------------------------------------------------------
     @app_commands.command(name="仕訳", description="仕訳を記録します（複式簿記）")
     @app_commands.describe(
-        借方="借方勘定科目",
-        貸方="貸方勘定科目",
+        借方="借方勘定科目（候補から選ぶか直接入力で新規指定も可）",
+        貸方="貸方勘定科目（候補から選ぶか直接入力で新規指定も可）",
         金額="金額（円、整数）",
         摘要="取引の説明",
         日付="取引日 YYYY-MM-DD（省略時は今日）",
     )
+    @app_commands.autocomplete(借方=_account_autocomplete, 貸方=_account_autocomplete)
     async def add_entry(
         self,
         interaction: discord.Interaction,
@@ -114,7 +127,7 @@ class Bookkeeping(commands.Cog):
             )
             return
 
-        # 勘定科目の存在確認
+        # 勘定科目の存在確認（未登録なら自動登録を促す）
         if not await db.account_exists(借方):
             await interaction.response.send_message(
                 f"勘定科目「{借方}」は登録されていません。`/勘定科目追加` で追加してください。",
@@ -247,7 +260,6 @@ class Bookkeeping(commands.Cog):
         assets = [r for r in rows if r["account_type"] == "資産"]
         liabilities = [r for r in rows if r["account_type"] == "負債"]
         equities = [r for r in rows if r["account_type"] == "資本"]
-        # 当期純利益を資本に含める
         revenues = [r for r in rows if r["account_type"] == "収益"]
         expenses = [r for r in rows if r["account_type"] == "費用"]
         net_income = sum(r["balance"] for r in revenues) - sum(r["balance"] for r in expenses)
@@ -341,6 +353,58 @@ class Bookkeeping(commands.Cog):
                 f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True
             )
 
+    # -------------------------------------------------------------------------
+    # /総勘定元帳  勘定科目
+    # -------------------------------------------------------------------------
+    @app_commands.command(name="総勘定元帳", description="指定した勘定科目の元帳（全取引・累積残高）を表示します")
+    @app_commands.describe(勘定科目="表示する勘定科目名")
+    @app_commands.autocomplete(勘定科目=_account_autocomplete)
+    async def general_ledger(self, interaction: discord.Interaction, 勘定科目: str):
+        if not await db.account_exists(勘定科目):
+            await interaction.response.send_message(
+                f"勘定科目「{勘定科目}」は登録されていません。", ephemeral=True
+            )
+            return
+
+        entries = await db.get_general_ledger(勘定科目)
+
+        if not entries:
+            await interaction.response.send_message(
+                f"「{勘定科目}」の仕訳がまだありません。", ephemeral=True
+            )
+            return
+
+        acc_type = entries[0]["account_type"]
+        # 資産・費用は借方残、負債・資本・収益は貸方残
+        balance_side = "借方" if acc_type in ("資産", "費用") else "貸方"
+
+        lines = []
+        for e in entries:
+            debit_str  = fmt_amount(e["debit"])  if e["debit"]  else "　　　　"
+            credit_str = fmt_amount(e["credit"]) if e["credit"] else "　　　　"
+            lines.append(
+                f"`{e['entry_date']}` {e['counterpart']}\n"
+                f"　借方: {debit_str}　貸方: {credit_str}　残高: {fmt_amount(e['balance'])}\n"
+                f"　摘要: {e['description']}"
+            )
+
+        # Discord embed の文字数制限 (4096) に対応して分割
+        CHUNK = 10
+        total = len(entries)
+        pages = [lines[i:i + CHUNK] for i in range(0, len(lines), CHUNK)]
+
+        embed = discord.Embed(
+            title=f"📖 総勘定元帳 ／ {勘定科目}（{acc_type}・{balance_side}残）",
+            description="\n".join(pages[0]),
+            color=discord.Color.dark_gold(),
+        )
+        if total > CHUNK:
+            embed.set_footer(text=f"全 {total} 件中 最初の {CHUNK} 件を表示")
+        else:
+            final_balance = entries[-1]["balance"]
+            embed.set_footer(text=f"全 {total} 件　期末残高: {fmt_amount(final_balance)}")
+
+        await interaction.response.send_message(embed=embed)
 
     # -------------------------------------------------------------------------
     # /ストレージ確認

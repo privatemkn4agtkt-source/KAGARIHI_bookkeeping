@@ -183,6 +183,49 @@ async def get_storage_info() -> dict:
     }
 
 
+async def get_general_ledger(account_name: str) -> list[dict]:
+    """指定勘定科目の全仕訳を時系列で返す（借方額・貸方額・相手科目・累積残高付き）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT account_type FROM accounts WHERE name = ?", (account_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return []
+            account_type = row["account_type"]
+
+        async with conn.execute(
+            """
+            SELECT
+                id,
+                entry_date,
+                CASE WHEN debit_account  = ? THEN amount ELSE 0 END AS debit,
+                CASE WHEN credit_account = ? THEN amount ELSE 0 END AS credit,
+                CASE WHEN debit_account  = ? THEN credit_account ELSE debit_account END AS counterpart,
+                description
+            FROM journal_entries
+            WHERE debit_account = ? OR credit_account = ?
+            ORDER BY entry_date, id
+            """,
+            (account_name, account_name, account_name, account_name, account_name),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        result = []
+        balance = 0
+        for r in rows:
+            row = dict(r)
+            if account_type in ("資産", "費用"):
+                balance += row["debit"] - row["credit"]
+            else:
+                balance += row["credit"] - row["debit"]
+            row["balance"] = balance
+            row["account_type"] = account_type
+            result.append(row)
+        return result
+
+
 async def delete_journal_entry(entry_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
