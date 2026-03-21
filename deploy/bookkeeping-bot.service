@@ -1,0 +1,18 @@
+[Unit]
+Description=KAGARIHI Bookkeeping Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/KAGARIHI_bookkeeping
+EnvironmentFile=/opt/KAGARIHI_bookkeeping/.env
+ExecStart=/opt/KAGARIHI_bookkeeping/venv/bin/python main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
