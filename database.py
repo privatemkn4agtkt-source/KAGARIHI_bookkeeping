@@ -465,11 +465,29 @@ async def get_cash_flow(period: str | None = None) -> dict:
             return "investing"
         return "financing"  # 負債, 資本
 
+    SOURCE_LABELS = ["ライブ", "グッズ", "Booth", "Fanbox"]
+
+    def get_source(entry: dict, non_cash_account: str) -> str | None:
+        """収支源を判定する。現金増減に直結する勘定科目とevent_tagから判定。"""
+        if entry.get("event_tag"):
+            return "ライブ"
+        acc_lower = non_cash_account.lower()
+        if "グッズ" in non_cash_account:
+            return "グッズ"
+        if "booth" in acc_lower:
+            return "Booth"
+        if "fanbox" in acc_lower:
+            return "Fanbox"
+        return None
+
     res = {k: 0 for k in (
         "operating_in", "operating_out",
         "investing_in", "investing_out",
         "financing_in", "financing_out",
     )}
+    source_breakdown: dict[str, dict[str, int]] = {
+        s: {"in": 0, "out": 0} for s in SOURCE_LABELS
+    }
     for e in entries:
         d_cash = e["debit_account"] in CASH_ACCOUNTS
         c_cash = e["credit_account"] in CASH_ACCOUNTS
@@ -478,14 +496,21 @@ async def get_cash_flow(period: str | None = None) -> dict:
         if d_cash:
             cat = classify(e["credit_account"], e["credit_type"] or "")
             res[f"{cat}_in"] += e["amount"]
+            src = get_source(e, e["credit_account"])
+            if src:
+                source_breakdown[src]["in"] += e["amount"]
         if c_cash:
             cat = classify(e["debit_account"], e["debit_type"] or "")
             res[f"{cat}_out"] += e["amount"]
+            src = get_source(e, e["debit_account"])
+            if src:
+                source_breakdown[src]["out"] += e["amount"]
 
     res["operating_net"] = res["operating_in"] - res["operating_out"]
     res["investing_net"] = res["investing_in"] - res["investing_out"]
     res["financing_net"] = res["financing_in"] - res["financing_out"]
     res["net_change"] = res["operating_net"] + res["investing_net"] + res["financing_net"]
+    res["source_breakdown"] = source_breakdown
     return res
 
 

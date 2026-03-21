@@ -426,6 +426,26 @@ class Bookkeeping(commands.Cog):
         )
         sign = "+" if cf["net_change"] >= 0 else ""
         embed.add_field(name="現金増減額", value=f"**{sign}{fmt_amount(cf['net_change'])}**", inline=False)
+
+        # ソース別内訳
+        SOURCE_ICONS = {"ライブ": "🎸", "グッズ": "👕", "Booth": "🛒", "Fanbox": "💛"}
+        breakdown_lines = []
+        for src, vals in cf["source_breakdown"].items():
+            net = vals["in"] - vals["out"]
+            if vals["in"] == 0 and vals["out"] == 0:
+                continue
+            sign_s = "+" if net >= 0 else ""
+            icon = SOURCE_ICONS.get(src, "")
+            breakdown_lines.append(
+                f"{icon} **{src}**: 収入 {fmt_amount(vals['in'])} / 支出 {fmt_amount(vals['out'])}　→ **{sign_s}{fmt_amount(net)}**"
+            )
+        if breakdown_lines:
+            embed.add_field(
+                name="【収益源別内訳】",
+                value=_truncate("\n".join(breakdown_lines)),
+                inline=False,
+            )
+
         embed.set_footer(text="現金・普通預金を対象に直接法で集計")
         await interaction.response.send_message(embed=embed)
 
