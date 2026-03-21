@@ -2,6 +2,20 @@
 
 Discordで複式簿記を管理するBotです。
 
+## Botの招待
+
+プライベートアプリケーションを招待する場合、Discord Developer Portalから**手動で招待URLを生成**する必要があります。
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) を開く
+2. アプリケーションを選択 → **OAuth2** → **URL Generator**
+3. **SCOPES** で以下を選択:
+   - `bot`
+   - `applications.commands`
+4. **BOT PERMISSIONS** で必要な権限を選択（最低限: `Send Messages`, `Use Application Commands`）
+5. 生成されたURLをブラウザで開いてサーバーに招待
+
+> **注意**: Developer Portalの「Default Authorization Link」は使用しないでください。プライベートアプリケーションはデフォルト認証リンクをサポートしておらず、「Integration requires code grant」エラーが発生します。
+
 ## セットアップ
 
 ```bash
