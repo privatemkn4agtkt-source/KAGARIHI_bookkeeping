@@ -1,5 +1,6 @@
 import aiosqlite
 import os
+import shutil
 from datetime import date
 
 DB_PATH = os.getenv("DB_PATH", "bookkeeping.db")
@@ -162,6 +163,24 @@ async def get_trial_balance() -> list[dict]:
                 row["balance"] = balance
                 result.append(row)
             return result
+
+
+async def get_storage_info() -> dict:
+    """ディスク使用量・DBファイルサイズ・仕訳件数を返す"""
+    db_path_abs = os.path.abspath(DB_PATH)
+    db_size = os.path.getsize(db_path_abs) if os.path.exists(db_path_abs) else 0
+    disk = shutil.disk_usage(os.path.dirname(db_path_abs))
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute("SELECT COUNT(*) FROM journal_entries") as cursor:
+            entry_count = (await cursor.fetchone())[0]
+    return {
+        "db_size": db_size,
+        "disk_total": disk.total,
+        "disk_used": disk.used,
+        "disk_free": disk.free,
+        "disk_percent": disk.used / disk.total * 100,
+        "entry_count": entry_count,
+    }
 
 
 async def delete_journal_entry(entry_id: int) -> bool:

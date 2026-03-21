@@ -1,17 +1,83 @@
+import os
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from datetime import date
 import database as db
+
+ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID", "0"))
+WARN_PERCENT = 70   # 警告閾値 (%)
+CRIT_PERCENT = 90   # 危険閾値 (%)
 
 
 def fmt_amount(n: int) -> str:
     return f"{n:,}円"
 
 
+def _storage_embed(info: dict) -> discord.Embed:
+    pct = info["disk_percent"]
+    if pct >= CRIT_PERCENT:
+        color = discord.Color.red()
+        title = "🚨 ストレージ警告: 残り僅か"
+    elif pct >= WARN_PERCENT:
+        color = discord.Color.orange()
+        title = "⚠️ ストレージ警告: 残量少"
+    else:
+        color = discord.Color.green()
+        title = "💾 ストレージ状況"
+
+    def fmt_bytes(n: int) -> str:
+        for unit in ("B", "KB", "MB", "GB"):
+            if n < 1024:
+                return f"{n:.1f} {unit}"
+            n /= 1024
+        return f"{n:.1f} TB"
+
+    embed = discord.Embed(title=title, color=color)
+    embed.add_field(name="ディスク使用率", value=f"{pct:.1f}%", inline=True)
+    embed.add_field(name="空き容量", value=fmt_bytes(info["disk_free"]), inline=True)
+    embed.add_field(name="合計容量", value=fmt_bytes(info["disk_total"]), inline=True)
+    embed.add_field(name="DBファイルサイズ", value=fmt_bytes(info["db_size"]), inline=True)
+    embed.add_field(name="仕訳件数", value=f"{info['entry_count']:,} 件", inline=True)
+    return embed
+
+
 class Bookkeeping(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._last_alert_level = 0  # 0=正常, 1=警告, 2=危険
+
+    def cog_load(self):
+        self.storage_check.start()
+
+    def cog_unload(self):
+        self.storage_check.cancel()
+
+    @tasks.loop(hours=1)
+    async def storage_check(self):
+        if not ALERT_CHANNEL_ID:
+            return
+        channel = self.bot.get_channel(ALERT_CHANNEL_ID)
+        if channel is None:
+            return
+        info = await db.get_storage_info()
+        pct = info["disk_percent"]
+
+        level = 0
+        if pct >= CRIT_PERCENT:
+            level = 2
+        elif pct >= WARN_PERCENT:
+            level = 1
+
+        # 前回より状況が悪化した時だけ通知
+        if level > self._last_alert_level:
+            embed = _storage_embed(info)
+            await channel.send(embed=embed)
+        self._last_alert_level = level
+
+    @storage_check.before_loop
+    async def before_storage_check(self):
+        await self.bot.wait_until_ready()
 
     # -------------------------------------------------------------------------
     # /仕訳  借方 貸方 金額 摘要 [日付]
@@ -274,6 +340,16 @@ class Bookkeeping(commands.Cog):
             await interaction.response.send_message(
                 f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True
             )
+
+
+    # -------------------------------------------------------------------------
+    # /ストレージ確認
+    # -------------------------------------------------------------------------
+    @app_commands.command(name="ストレージ確認", description="ディスク使用量とDB情報を表示します")
+    async def storage_status(self, interaction: discord.Interaction):
+        info = await db.get_storage_info()
+        embed = _storage_embed(info)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
