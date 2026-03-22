@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>🏠 ダッシュボード</h1>
+
+<!-- KPI カード -->
+<div class="grid grid-4" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">{{ year }}年 収益合計</div>
+    <div class="card-value blue">{{ fmt(total_rev) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">{{ year }}年 費用合計</div>
+    <div class="card-value gold">{{ fmt(total_exp) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">{{ year }}年 純損益</div>
+    <div class="card-value {{ 'green' if net_year >= 0 else 'red' }}">{{ fmt(net_year) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">今月収益</div>
+    <div class="card-value blue">{{ fmt(monthly.total_revenue) }}</div>
+  </div>
+</div>
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">登録イベント</div>
+    <div class="card-value" style="color:var(--accent)">{{ event_count }} 件</div>
+  </div>
+  <div class="card">
+    <div class="card-title">グッズ種類</div>
+    <div class="card-value" style="color:var(--accent2)">{{ goods_count }} 種</div>
+  </div>
+  <div class="card">
+    <div class="card-title">メンバー</div>
+    <div class="card-value" style="color:var(--muted)">{{ member_count }} 名</div>
+  </div>
+</div>
+
+<!-- 今月収支 -->
+<div class="card">
+  <h2>今月収支（{{ monthly.period }}）</h2>
+  <div class="grid grid-3">
+    <div>
+      <div class="card-title">収益</div>
+      <div style="font-size:20px;font-weight:700;color:var(--green)">{{ fmt(monthly.total_revenue) }}</div>
+      {% for k, v in monthly.revenues.items() %}
+        <div style="font-size:13px;color:var(--muted);margin-top:6px;">{{ k }}: {{ fmt(v) }}</div>
+      {% endfor %}
+    </div>
+    <div>
+      <div class="card-title">費用</div>
+      <div style="font-size:20px;font-weight:700;color:var(--red)">{{ fmt(monthly.total_expense) }}</div>
+      {% for k, v in monthly.expenses.items() %}
+        <div style="font-size:13px;color:var(--muted);margin-top:6px;">{{ k }}: {{ fmt(v) }}</div>
+      {% endfor %}
+    </div>
+    <div>
+      <div class="card-title">純損益</div>
+      {% set net = monthly.net %}
+      <div style="font-size:20px;font-weight:700;" class="{{ 'green' if net >= 0 else 'red' }}">{{ fmt(net) }}</div>
+    </div>
+  </div>
+</div>
+
+<div style="color:var(--muted);font-size:12px;text-align:right;">
+  各ページへのリンクは左のサイドバーからどうぞ
+</div>
+{% endblock %}

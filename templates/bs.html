@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}貸借対照表 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>🏦 貸借対照表</h1>
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">資産合計</div>
+    <div class="card-value blue">{{ fmt(total_asset) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">負債合計</div>
+    <div class="card-value gold">{{ fmt(total_liab) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">純資産合計</div>
+    <div class="card-value {{ 'green' if total_eq >= 0 else 'red' }}">{{ fmt(total_eq) }}</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <!-- 資産 -->
+  <div class="card">
+    <h2>資産の部</h2>
+    <table>
+      <thead><tr><th>科目</th><th class="text-right">残高</th></tr></thead>
+      <tbody>
+        {% for r in assets %}
+        <tr>
+          <td><span class="badge badge-asset">資産</span> {{ r.name }}</td>
+          <td class="text-right amount neutral">{{ fmt(r.balance) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row"><td>資産合計</td><td class="text-right amount blue">{{ fmt(total_asset) }}</td></tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- 負債・純資産 -->
+  <div class="card">
+    <h2>負債・純資産の部</h2>
+    <table>
+      <thead><tr><th>科目</th><th class="text-right">残高</th></tr></thead>
+      <tbody>
+        {% if liabs %}
+        <tr class="section-header"><td colspan="2">負債の部</td></tr>
+        {% for r in liabs %}
+        <tr>
+          <td><span class="badge badge-liab">負債</span> {{ r.name }}</td>
+          <td class="text-right amount neutral">{{ fmt(r.balance) }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="total-row"><td>負債合計</td><td class="text-right amount gold">{{ fmt(total_liab) }}</td></tr>
+        {% endif %}
+        <tr class="section-header"><td colspan="2">純資産の部</td></tr>
+        {% for r in equity %}
+        <tr>
+          <td><span class="badge badge-eq">資本</span> {{ r.name }}</td>
+          <td class="text-right amount neutral">{{ fmt(r.balance) }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td><span class="badge badge-eq">資本</span> 当期純損益</td>
+          <td class="text-right amount {{ 'pos' if net_income >= 0 else 'neg' }}">{{ fmt(net_income) }}</td>
+        </tr>
+        <tr class="total-row">
+          <td>純資産合計</td>
+          <td class="text-right amount {{ 'green' if total_eq >= 0 else 'red' }}">{{ fmt(total_eq) }}</td>
+        </tr>
+        <tr class="total-row">
+          <td>負債・純資産合計</td>
+          <td class="text-right amount blue">{{ fmt(total_liab + total_eq) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

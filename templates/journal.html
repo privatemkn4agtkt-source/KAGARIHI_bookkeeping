@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}仕訳帳 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📒 仕訳帳</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>開始日</label><input type="date" name="start" value="{{ start }}"></div>
+  <div><label>終了日</label><input type="date" name="end" value="{{ end }}"></div>
+  <div>
+    <label>勘定科目</label>
+    <select name="account">
+      <option value="">すべて</option>
+      {% for a in accounts %}<option value="{{ a.name }}" {% if a.name == account %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <div><label>表示件数</label><input type="number" name="limit" value="{{ limit }}" style="width:70px;"></div>
+  <button class="btn btn-primary" type="submit">絞り込み</button>
+</form>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>日付</th>
+        <th>借方</th>
+        <th>貸方</th>
+        <th class="text-right">金額</th>
+        <th>消費税</th>
+        <th>摘要</th>
+        <th>イベント</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">#{{ "%04d"|format(e.id) }}</td>
+        <td style="color:var(--muted);">{{ e.entry_date }}</td>
+        <td><span class="badge badge-exp">借</span> {{ e.debit_account }}</td>
+        <td><span class="badge badge-rev">貸</span> {{ e.credit_account }}</td>
+        <td class="text-right amount neutral">{{ fmt(e.amount) }}</td>
+        <td class="text-center">
+          {% if e.tax_rate > 0 %}
+            <span class="badge" style="background:#2a2a1a;color:var(--gold);">{{ e.tax_rate }}%</span>
+          {% else %}
+            <span style="color:var(--muted);font-size:12px;">—</span>
+          {% endif %}
+        </td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.description }}</td>
+        <td>
+          {% if e.event_tag %}<span class="tag event">🎸 {{ e.event_tag }}</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center" style="color:var(--muted);padding:24px;">仕訳がありません</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

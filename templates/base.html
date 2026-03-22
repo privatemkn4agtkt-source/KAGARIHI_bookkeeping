@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}KAGARIHI 会計{% endblock %}</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #252836;
+      --border: #2e3147;
+      --accent: #7c6af7;
+      --accent2: #5cb8ff;
+      --green: #4caf82;
+      --red: #e05c5c;
+      --gold: #f5a623;
+      --text: #e8eaf0;
+      --muted: #8b8fa8;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+    }
+    /* ── サイドバー ── */
+    nav {
+      width: 220px;
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+    nav .logo {
+      padding: 0 20px 24px;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    nav .logo span { font-size: 22px; display: block; margin-bottom: 2px; }
+    nav a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      transition: all .15s;
+      border-left: 3px solid transparent;
+    }
+    nav a:hover, nav a.active {
+      color: var(--text);
+      background: var(--surface2);
+      border-left-color: var(--accent);
+    }
+    nav .section-label {
+      padding: 16px 20px 6px;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    /* ── メインコンテンツ ── */
+    main {
+      flex: 1;
+      padding: 32px 40px;
+      overflow-x: auto;
+    }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 24px; }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 14px; color: var(--muted); }
+    /* ── カード ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .card-title {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+    }
+    .card-value.green { color: var(--green); }
+    .card-value.red   { color: var(--red); }
+    .card-value.gold  { color: var(--gold); }
+    .card-value.blue  { color: var(--accent2); }
+    .grid { display: grid; gap: 16px; }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    /* ── テーブル ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      padding: 10px 14px;
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .amount { font-variant-numeric: tabular-nums; }
+    .amount.pos { color: var(--green); }
+    .amount.neg { color: var(--red); }
+    .amount.neutral { color: var(--text); }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-rev  { background: #1a3a2a; color: var(--green); }
+    .badge-exp  { background: #3a1a1a; color: var(--red); }
+    .badge-asset{ background: #1a2a3a; color: var(--accent2); }
+    .badge-liab { background: #3a2a1a; color: var(--gold); }
+    .badge-eq   { background: #2a1a3a; color: var(--accent); }
+    .badge-in   { background: #1a3a2a; color: var(--green); }
+    .badge-out  { background: #3a1a1a; color: var(--red); }
+    /* ── フォーム ── */
+    .filter-bar {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .filter-bar label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+    .filter-bar input, .filter-bar select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: .85; }
+    /* ── 棒グラフ ── */
+    .bar-wrap { display: flex; align-items: center; gap: 10px; }
+    .bar-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; }
+    .bar-fill.rev { background: var(--green); }
+    .bar-fill.exp { background: var(--red); }
+    /* ── タグ ── */
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .tag.event { color: var(--accent); border: 1px solid var(--accent); }
+    /* ── 区切り ── */
+    .total-row td {
+      border-top: 2px solid var(--border);
+      font-weight: 700;
+      background: var(--surface2);
+    }
+    .section-header td {
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      padding: 6px 14px;
+    }
+    @media (max-width: 900px) {
+      nav { display: none; }
+      main { padding: 20px; }
+      .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="logo">
+      <span>🎸</span>KAGARIHI 会計
+    </div>
+    <div class="section-label">概要</div>
+    <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>🏠 ダッシュボード</a>
+
+    <div class="section-label">財務諸表</div>
+    <a href="/pl"    {% if request.url.path == "/pl"    %}class="active"{% endif %}>📊 損益計算書</a>
+    <a href="/bs"    {% if request.url.path == "/bs"    %}class="active"{% endif %}>🏦 貸借対照表</a>
+    <a href="/trial" {% if request.url.path == "/trial" %}class="active"{% endif %}>📋 試算表</a>
+
+    <div class="section-label">明細</div>
+    <a href="/journal" {% if request.url.path == "/journal" %}class="active"{% endif %}>📒 仕訳帳</a>
+    <a href="/events"  {% if request.url.path == "/events"  %}class="active"{% endif %}>🎸 ライブ収支</a>
+    <a href="/goods"   {% if request.url.path == "/goods"   %}class="active"{% endif %}>📦 グッズ在庫</a>
+
+    <div class="section-label">税務</div>
+    <a href="/tax"       {% if request.url.path == "/tax"       %}class="active"{% endif %}>🧾 消費税サマリー</a>
+    <a href="/taxreturn" {% if request.url.path == "/taxreturn" %}class="active"{% endif %}>📋 確定申告サマリー</a>
+  </nav>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

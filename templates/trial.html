@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}試算表 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📋 試算表</h1>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>区分</th>
+        <th>勘定科目</th>
+        <th class="text-right">借方合計</th>
+        <th class="text-right">貸方合計</th>
+        <th class="text-right">残高</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set type_order = ["資産", "負債", "資本", "収益", "費用"] %}
+      {% set badge_map = {"資産": "badge-asset", "負債": "badge-liab", "資本": "badge-eq", "収益": "badge-rev", "費用": "badge-exp"} %}
+      {% for acct_type in type_order %}
+        {% set type_rows = rows | selectattr("account_type", "equalto", acct_type) | list %}
+        {% if type_rows %}
+          {% for r in type_rows %}
+          <tr>
+            <td><span class="badge {{ badge_map[acct_type] }}">{{ acct_type }}</span></td>
+            <td>{{ r.name }}</td>
+            <td class="text-right amount neutral">{{ fmt(r.debit_total) }}</td>
+            <td class="text-right amount neutral">{{ fmt(r.credit_total) }}</td>
+            <td class="text-right amount {{ 'pos' if r.balance >= 0 else 'neg' }}">{{ fmt(r.balance) }}</td>
+          </tr>
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="2">合計</td>
+        <td class="text-right amount neutral">{{ fmt(total_debit) }}</td>
+        <td class="text-right amount neutral">{{ fmt(total_credit) }}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endblock %}

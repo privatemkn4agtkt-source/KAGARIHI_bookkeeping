@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}確定申告サマリー – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📋 確定申告サマリー</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>対象年</label><input type="text" name="year" value="{{ year }}" placeholder="2025" style="width:90px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+<!-- KPI -->
+<div class="grid grid-4" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">収入合計</div>
+    <div class="card-value green">{{ fmt(result.total_revenue) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">経費合計</div>
+    <div class="card-value red">{{ fmt(result.total_expense) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">事業所得</div>
+    <div class="card-value {{ 'green' if result.gross_income >= 0 else 'red' }}">{{ fmt(result.gross_income) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">合計納税額（概算）</div>
+    <div class="card-value {{ 'red' if result.total_tax > 0 else 'muted' }}">{{ fmt(result.total_tax) }}</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <!-- 収入内訳 -->
+  <div class="card">
+    <h2>収入内訳</h2>
+    <table>
+      <thead><tr><th>科目</th><th class="text-right">金額</th><th class="text-right">構成比</th></tr></thead>
+      <tbody>
+        {% for k, v in result.revenues.items() | sort(attribute='1', reverse=True) %}
+        <tr>
+          <td>{{ k }}</td>
+          <td class="text-right amount pos">{{ fmt(v) }}</td>
+          <td class="text-right" style="color:var(--muted);font-size:12px;">
+            {% if result.total_revenue > 0 %}{{ "%.1f"|format(v / result.total_revenue * 100) }}%{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row"><td>収入合計</td><td class="text-right amount pos">{{ fmt(result.total_revenue) }}</td><td></td></tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- 経費内訳 -->
+  <div class="card">
+    <h2>経費内訳</h2>
+    <table>
+      <thead><tr><th>科目</th><th class="text-right">金額</th><th class="text-right">構成比</th></tr></thead>
+      <tbody>
+        {% for k, v in result.expenses.items() | sort(attribute='1', reverse=True) %}
+        <tr>
+          <td>{{ k }}</td>
+          <td class="text-right amount neg">{{ fmt(v) }}</td>
+          <td class="text-right" style="color:var(--muted);font-size:12px;">
+            {% if result.total_expense > 0 %}{{ "%.1f"|format(v / result.total_expense * 100) }}%{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row"><td>経費合計</td><td class="text-right amount neg">{{ fmt(result.total_expense) }}</td><td></td></tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- 所得計算 -->
+<div class="card">
+  <h2>所得・税額計算</h2>
+  <table>
+    <tbody>
+      <tr>
+        <td style="width:300px;">収入合計</td>
+        <td class="text-right amount pos">{{ fmt(result.total_revenue) }}</td>
+        <td style="color:var(--muted);font-size:13px;padding-left:24px;"></td>
+      </tr>
+      <tr>
+        <td>経費合計</td>
+        <td class="text-right amount neg">▲{{ fmt(result.total_expense) }}</td>
+        <td></td>
+      </tr>
+      <tr class="total-row">
+        <td>事業所得</td>
+        <td class="text-right amount {{ 'pos' if result.gross_income >= 0 else 'neg' }}">{{ fmt(result.gross_income) }}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>青色申告特別控除</td>
+        <td class="text-right amount neg">▲{{ fmt(result.blue_return_deduction) }}</td>
+        <td style="color:var(--muted);font-size:13px;padding-left:24px;">最大65万円（簡易適用）</td>
+      </tr>
+      <tr class="total-row">
+        <td>差引所得金額</td>
+        <td class="text-right amount neutral">{{ fmt(result.taxable_income) }}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>基礎控除</td>
+        <td class="text-right amount neg">▲{{ fmt(result.basic_deduction) }}</td>
+        <td style="color:var(--muted);font-size:13px;padding-left:24px;">48万円</td>
+      </tr>
+      <tr class="total-row">
+        <td>課税所得金額</td>
+        <td class="text-right amount {{ 'neg' if result.taxable_after_deductions > 0 else 'neutral' }}">{{ fmt(result.taxable_after_deductions) }}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>所得税（累進税率）</td>
+        <td class="text-right amount neg">{{ fmt(result.income_tax) }}</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>復興特別所得税（2.1%）</td>
+        <td class="text-right amount neg">{{ fmt(result.surtax) }}</td>
+        <td></td>
+      </tr>
+      <tr class="total-row">
+        <td><strong>合計納税額（概算）</strong></td>
+        <td class="text-right amount {{ 'neg' if result.total_tax > 0 else 'neutral' }}"><strong>{{ fmt(result.total_tax) }}</strong></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="margin-top:16px;padding:12px;background:var(--surface2);border-radius:6px;font-size:12px;color:var(--muted);">
+    ⚠️ この計算は概算です。社会保険料控除・医療費控除等は含まれていません。正確な申告は税理士にご相談ください。
+  </div>
+</div>
+{% endblock %}

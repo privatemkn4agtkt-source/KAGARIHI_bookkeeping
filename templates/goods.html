@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}グッズ在庫 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📦 グッズ在庫</h1>
+
+<!-- 在庫サマリー -->
+<div class="card">
+  <h2>在庫一覧</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>グッズ名</th>
+        <th class="text-right">販売単価</th>
+        <th class="text-right">在庫数</th>
+        <th class="text-right">仕入総額</th>
+        <th class="text-right">売上総額</th>
+        <th class="text-right">粗利</th>
+        <th class="text-right">在庫評価額</th>
+        <th>仕入/売上</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for g in inventory %}
+      {% set profit_rate = (g.gross_profit / g.total_purchase_amount * 100) if g.total_purchase_amount > 0 else 0 %}
+      <tr>
+        <td><strong>{{ g.name }}</strong></td>
+        <td class="text-right amount neutral">{{ fmt(g.selling_price) }}</td>
+        <td class="text-right">
+          <span style="font-weight:600;color:{{ 'var(--green)' if g.stock > 0 else 'var(--muted)' }}">{{ g.stock }} 個</span>
+        </td>
+        <td class="text-right amount neutral">{{ fmt(g.total_purchase_amount) }}</td>
+        <td class="text-right amount pos">{{ fmt(g.total_sales_amount) }}</td>
+        <td class="text-right amount {{ 'pos' if g.gross_profit >= 0 else 'neg' }}">{{ fmt(g.gross_profit) }}</td>
+        <td class="text-right amount neutral">{{ fmt(g.inventory_value) }}</td>
+        <td>
+          <div style="font-size:11px;color:var(--muted);">
+            仕入 {{ g.total_purchased }}個 / 販売 {{ g.total_sold }}個
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center" style="color:var(--muted);padding:24px;">グッズが登録されていません</td></tr>
+      {% endfor %}
+    </tbody>
+    {% if inventory %}
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="3">合計</td>
+        <td class="text-right amount neutral">{{ fmt(inventory | sum(attribute='total_purchase_amount')) }}</td>
+        <td class="text-right amount pos">{{ fmt(inventory | sum(attribute='total_sales_amount')) }}</td>
+        <td class="text-right amount {{ 'pos' if inventory | sum(attribute='gross_profit') >= 0 else 'neg' }}">
+          {{ fmt(inventory | sum(attribute='gross_profit')) }}
+        </td>
+        <td class="text-right amount neutral">{{ fmt(inventory | sum(attribute='inventory_value')) }}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+</div>
+
+<!-- 取引履歴 -->
+<div class="card">
+  <h2>取引履歴（直近50件）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>日付</th>
+        <th>グッズ名</th>
+        <th>区分</th>
+        <th class="text-right">数量</th>
+        <th class="text-right">単価</th>
+        <th class="text-right">合計</th>
+        <th>摘要</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in transactions %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">#{{ "%04d"|format(t.id) }}</td>
+        <td style="color:var(--muted);">{{ t.entry_date }}</td>
+        <td><strong>{{ t.goods_name }}</strong></td>
+        <td>
+          {% if t.tx_type == "仕入" %}
+            <span class="badge badge-in">📥 仕入</span>
+          {% elif t.tx_type == "販売" %}
+            <span class="badge badge-out">💰 販売</span>
+          {% else %}
+            <span class="badge">{{ t.tx_type }}</span>
+          {% endif %}
+        </td>
+        <td class="text-right">{{ t.quantity }} 個</td>
+        <td class="text-right amount neutral">{{ fmt(t.unit_price) }}</td>
+        <td class="text-right amount {{ 'pos' if t.tx_type == '販売' else 'neutral' }}">{{ fmt(t.total_amount) }}</td>
+        <td style="color:var(--muted);font-size:13px;">{{ t.description }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center" style="color:var(--muted);padding:24px;">取引履歴がありません</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

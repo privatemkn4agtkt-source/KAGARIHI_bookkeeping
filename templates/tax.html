@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}消費税サマリー – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>🧾 消費税サマリー</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>期間（YYYY または YYYY-MM）</label><input type="text" name="period" value="{{ period }}" placeholder="2025" style="width:130px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+<div class="grid grid-4" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">課税売上（税抜）</div>
+    <div class="card-value green">{{ fmt(result.taxable_revenue) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">仮受消費税</div>
+    <div class="card-value blue">{{ fmt(result.collected_tax) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">課税仕入（税抜）</div>
+    <div class="card-value gold">{{ fmt(result.taxable_expense) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">仮払消費税</div>
+    <div class="card-value gold">{{ fmt(result.paid_tax) }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:24px;">
+    <div>
+      <div class="card-title">{{ "還付消費税" if result.tax_payable < 0 else "納付消費税（概算）" }}</div>
+      <div class="card-value {{ 'green' if result.tax_payable < 0 else 'red' }}" style="font-size:36px;">
+        {{ fmt(result.tax_payable) }}
+      </div>
+    </div>
+    <div style="color:var(--muted);font-size:13px;line-height:1.8;">
+      計算式: 仮受消費税 {{ fmt(result.collected_tax) }} − 仮払消費税 {{ fmt(result.paid_tax) }}<br>
+      ※ 簡易計算です。正確な申告は税理士にご相談ください。
+    </div>
+  </div>
+</div>
+
+{% if result.details %}
+<div class="card">
+  <h2>明細（{{ result.details | length }} 件）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>日付</th><th>区分</th><th>摘要</th>
+        <th class="text-right">税込金額</th>
+        <th class="text-right">税率</th>
+        <th class="text-right">消費税額</th>
+        <th class="text-right">税抜金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in result.details %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">#{{ "%04d"|format(d.id) }}</td>
+        <td style="color:var(--muted);">{{ d.entry_date }}</td>
+        <td>
+          {% if d.type == "収益" %}<span class="badge badge-rev">収益</span>
+          {% elif d.type == "費用" %}<span class="badge badge-exp">費用</span>
+          {% else %}<span class="badge">{{ d.type }}</span>{% endif %}
+        </td>
+        <td>{{ d.description }}</td>
+        <td class="text-right amount neutral">{{ fmt(d.amount_incl) }}</td>
+        <td class="text-center"><span class="badge" style="background:#2a2a1a;color:var(--gold);">{{ d.tax_rate }}%</span></td>
+        <td class="text-right amount gold">{{ fmt(d.tax_amount) }}</td>
+        <td class="text-right amount neutral">{{ fmt(d.amount_excl) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="color:var(--muted);text-align:center;padding:40px;">
+  消費税が設定された仕訳がありません。<br>
+  Discordの /仕訳 コマンドで「消費税率」を指定して記録してください。
+</div>
+{% endif %}
+{% endblock %}

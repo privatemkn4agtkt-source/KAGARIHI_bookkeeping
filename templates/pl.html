@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}損益計算書 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📊 損益計算書</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>対象年</label><input type="text" name="year" value="{{ year }}" placeholder="2025" style="width:90px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">収益合計</div>
+    <div class="card-value green">{{ fmt(total_rev) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">費用合計</div>
+    <div class="card-value red">{{ fmt(total_exp) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">当期純損益</div>
+    <div class="card-value {{ 'green' if net >= 0 else 'red' }}">{{ fmt(net) }}</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <!-- 収益 -->
+  <div class="card">
+    <h2>収益</h2>
+    <table>
+      <thead><tr><th>科目</th><th class="text-right">金額</th><th class="text-right">構成比</th></tr></thead>
+      <tbody>
+        {% for name, amt in revenues %}
+        <tr>
+          <td>{{ name }}</td>
+          <td class="text-right amount pos">{{ fmt(amt) }}</td>
+          <td class="text-right" style="color:var(--muted);font-size:12px;">
+            {% if total_rev > 0 %}{{ "%.1f"|format(amt / total_rev * 100) }}%{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row">
+          <td>収益合計</td>
+          <td class="text-right amount pos">{{ fmt(total_rev) }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- 費用 -->
+  <div class="card">
+    <h2>費用</h2>
+    <table>
+      <thead><tr><th>科目</th><th class="text-right">金額</th><th class="text-right">構成比</th></tr></thead>
+      <tbody>
+        {% for name, amt in expenses %}
+        <tr>
+          <td>{{ name }}</td>
+          <td class="text-right amount neg">{{ fmt(amt) }}</td>
+          <td class="text-right" style="color:var(--muted);font-size:12px;">
+            {% if total_exp > 0 %}{{ "%.1f"|format(amt / total_exp * 100) }}%{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row">
+          <td>費用合計</td>
+          <td class="text-right amount neg">{{ fmt(total_exp) }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- 月次推移 -->
+<div class="card">
+  <h2>月次推移（{{ year }}年）</h2>
+  {% set max_val = monthly_rows | map(attribute='revenue') | max %}
+  <table>
+    <thead><tr><th>月</th><th class="text-right">収益</th><th class="text-right">費用</th><th class="text-right">純損益</th><th style="width:200px;">グラフ</th></tr></thead>
+    <tbody>
+      {% for row in monthly_rows %}
+      {% set net_m = row.revenue - row.expense %}
+      <tr>
+        <td>{{ row.month }}</td>
+        <td class="text-right amount pos">{{ fmt(row.revenue) }}</td>
+        <td class="text-right amount neg">{{ fmt(row.expense) }}</td>
+        <td class="text-right amount {{ 'pos' if net_m >= 0 else 'neg' }}">{{ fmt(net_m) }}</td>
+        <td>
+          {% if max_val > 0 %}
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <div class="bar-track"><div class="bar-fill rev" style="width:{{ (row.revenue / max_val * 100)|int }}%"></div></div>
+            <div class="bar-track"><div class="bar-fill exp" style="width:{{ (row.expense / max_val * 100)|int }}%"></div></div>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
