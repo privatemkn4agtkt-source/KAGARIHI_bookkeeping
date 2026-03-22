@@ -1035,11 +1035,11 @@ class Bookkeeping(commands.Cog):
     # =========================================================================
 
     @app_commands.command(name="仕訳削除", description="指定したIDの仕訳を削除します（確認あり）")
-    @app_commands.describe(仕訳ID="削除する仕訳のID（/仕訳帳 で確認できます）")
-    async def delete_entry(self, interaction: discord.Interaction, 仕訳ID: int):
-        entry = await db.get_journal_entry(仕訳ID)
+    @app_commands.describe(仕訳id="削除する仕訳のID（/仕訳帳 で確認できます）")
+    async def delete_entry(self, interaction: discord.Interaction, 仕訳id: int):
+        entry = await db.get_journal_entry(仕訳id)
         if not entry:
-            await interaction.response.send_message(f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True)
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
             return
 
         event_str = f"\nイベント: {entry['event_tag']}" if entry.get("event_tag") else ""
@@ -1114,7 +1114,7 @@ class Bookkeeping(commands.Cog):
 
     @app_commands.command(name="仕訳編集", description="既存の仕訳を編集します")
     @app_commands.describe(
-        仕訳ID="編集する仕訳のID",
+        仕訳id="編集する仕訳のID",
         借方="新しい借方勘定科目",
         貸方="新しい貸方勘定科目",
         金額="新しい金額",
@@ -1126,7 +1126,7 @@ class Bookkeeping(commands.Cog):
     async def edit_entry(
         self,
         interaction: discord.Interaction,
-        仕訳ID: int,
+        仕訳id: int,
         借方: str | None = None,
         貸方: str | None = None,
         金額: int | None = None,
@@ -1134,9 +1134,9 @@ class Bookkeeping(commands.Cog):
         日付: str | None = None,
         イベント: str | None = None,
     ):
-        entry = await db.get_journal_entry(仕訳ID)
+        entry = await db.get_journal_entry(仕訳id)
         if not entry:
-            await interaction.response.send_message(f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True)
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
             return
 
         new_debit   = 借方 or entry["debit_account"]
@@ -1164,9 +1164,9 @@ class Bookkeeping(commands.Cog):
             await interaction.response.send_message(f"イベント「{new_tag}」は登録されていません。", ephemeral=True)
             return
 
-        await db.update_journal_entry(仕訳ID, new_date, new_debit, new_credit, new_amount, new_desc, new_tag)
+        await db.update_journal_entry(仕訳id, new_date, new_debit, new_credit, new_amount, new_desc, new_tag)
 
-        embed = discord.Embed(title=f"✏️ 仕訳 #{仕訳ID:04d} を編集しました", color=discord.Color.orange())
+        embed = discord.Embed(title=f"✏️ 仕訳 #{仕訳id:04d} を編集しました", color=discord.Color.orange())
         embed.add_field(name="日付", value=new_date, inline=True)
         embed.add_field(name="金額", value=fmt_amount(new_amount), inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
@@ -1180,26 +1180,26 @@ class Bookkeeping(commands.Cog):
 
     @app_commands.command(name="仕訳タグ変更", description="仕訳のイベントタグを後から変更・解除します")
     @app_commands.describe(
-        仕訳ID="変更する仕訳のID",
+        仕訳id="変更する仕訳のID",
         イベント="新しいイベント名（空欄で解除）",
     )
     @app_commands.autocomplete(イベント=_event_autocomplete)
     async def change_entry_tag(
         self,
         interaction: discord.Interaction,
-        仕訳ID: int,
+        仕訳id: int,
         イベント: str | None = None,
     ):
-        entry = await db.get_journal_entry(仕訳ID)
+        entry = await db.get_journal_entry(仕訳id)
         if not entry:
-            await interaction.response.send_message(f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True)
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
             return
         new_tag = イベント or None
         if new_tag and not await db.event_exists(new_tag):
             await interaction.response.send_message(f"イベント「{new_tag}」は登録されていません。", ephemeral=True)
             return
-        await db.update_journal_entry_tag(仕訳ID, new_tag)
-        msg = f"✅ 仕訳 #{仕訳ID:04d} のイベントタグを「{new_tag}」に変更しました。" if new_tag else f"✅ 仕訳 #{仕訳ID:04d} のイベントタグを解除しました。"
+        await db.update_journal_entry_tag(仕訳id, new_tag)
+        msg = f"✅ 仕訳 #{仕訳id:04d} のイベントタグを「{new_tag}」に変更しました。" if new_tag else f"✅ 仕訳 #{仕訳id:04d} のイベントタグを解除しました。"
         await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="ストレージ確認", description="ディスク使用量とDB情報を表示します")
