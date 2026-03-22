@@ -847,38 +847,38 @@ class Bookkeeping(commands.Cog):
             color=discord.Color.orange(),
         )
         embed.add_field(name="メンバー別合計", value="\n".join(total_lines), inline=False)
-        embed.set_footer(text="`/立替精算済み 立替ID` で精算済みにできます")
+        embed.set_footer(text="`/立替精算済み 立替id` で精算済みにできます")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="立替精算済み", description="指定した立替を精算済みにします")
     @app_commands.describe(
-        立替ID="精算済みにする立替のID（/立替精算表 で確認）",
+        立替id="精算済みにする立替のID（/立替精算表 で確認）",
         仕訳作成="Trueにすると「未払金 / 現金」の精算仕訳も自動作成します",
     )
     async def settle_advance(
         self,
         interaction: discord.Interaction,
-        立替ID: int,
+        立替id: int,
         仕訳作成: bool = False,
     ):
         advances = await db.get_advances(settled=False)
-        target = next((a for a in advances if a["id"] == 立替ID), None)
+        target = next((a for a in advances if a["id"] == 立替id), None)
         if not target:
             await interaction.response.send_message(
-                f"❌ 立替 #{立替ID:04d} が見つからないか、すでに精算済みです。", ephemeral=True
+                f"❌ 立替 #{立替id:04d} が見つからないか、すでに精算済みです。", ephemeral=True
             )
             return
 
-        success = await db.settle_advance(立替ID)
+        success = await db.settle_advance(立替id)
         if not success:
             await interaction.response.send_message(f"❌ 精算処理に失敗しました。", ephemeral=True)
             return
 
-        msg = f"✅ 立替 #{立替ID:04d}（{target['paid_by']} / {fmt_amount(target['amount'])} / {target['description']}）を精算済みにしました。"
+        msg = f"✅ 立替 #{立替id:04d}（{target['paid_by']} / {fmt_amount(target['amount'])} / {target['description']}）を精算済みにしました。"
         if 仕訳作成:
             entry_id = await db.add_journal_entry(
                 str(date.today()), "未払金", "現金",
-                target["amount"], f"【立替#{立替ID:04d}精算】{target['description']}",
+                target["amount"], f"【立替#{立替id:04d}精算】{target['description']}",
             )
             msg += f"\n仕訳 #{entry_id:04d}　未払金 / 現金　{fmt_amount(target['amount'])} も作成しました。"
         await interaction.response.send_message(msg, ephemeral=True)
