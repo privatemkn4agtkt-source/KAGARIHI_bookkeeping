@@ -101,6 +101,15 @@ async def init_db():
             )
         """)
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS allowed_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discord_user_id TEXT UNIQUE NOT NULL,
+                display_name TEXT,
+                added_by TEXT,
+                added_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_name TEXT NOT NULL,
@@ -148,6 +157,16 @@ async def init_db():
             await db.execute("ALTER TABLE journal_entries ADD COLUMN tax_rate INTEGER DEFAULT 0")
         except Exception:
             pass
+        # 環境変数 ALLOWED_DISCORD_IDS の初回シード（既存レコードは無視）
+        import os as _os
+        _raw = _os.getenv("ALLOWED_DISCORD_IDS", "")
+        for _uid in (_raw.split(",") if _raw else []):
+            _uid = _uid.strip()
+            if _uid:
+                await db.execute(
+                    "INSERT OR IGNORE INTO allowed_users (discord_user_id, added_by) VALUES (?, 'env')",
+                    (_uid,),
+                )
         await db.commit()
 
 
@@ -803,6 +822,61 @@ async def set_budget(account_name: str, period: str, amount: int) -> None:
         await conn.execute(
             "INSERT OR REPLACE INTO budgets (account_name, period, budget_amount) VALUES (?, ?, ?)",
             (account_name, period, amount),
+        )
+        await conn.commit()
+
+
+# =============================================================================
+# ダッシュボード許可ユーザー管理
+# =============================================================================
+
+async def get_allowed_users() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT discord_user_id, display_name, added_by, added_at FROM allowed_users ORDER BY added_at"
+        ) as cursor:
+            return [dict(r) for r in await cursor.fetchall()]
+
+
+async def is_allowed_user(discord_user_id: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            "SELECT 1 FROM allowed_users WHERE discord_user_id = ?", (discord_user_id,)
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def add_allowed_user(discord_user_id: str, display_name: str, added_by: str) -> bool:
+    """許可ユーザーを追加。すでに存在する場合は False を返す。"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        try:
+            await conn.execute(
+                "INSERT INTO allowed_users (discord_user_id, display_name, added_by) VALUES (?, ?, ?)",
+                (discord_user_id, display_name, added_by),
+            )
+            await conn.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            return False
+
+
+async def remove_allowed_user(discord_user_id: str) -> bool:
+    """許可ユーザーを削除。見つからない場合は False を返す。"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute(
+            "DELETE FROM allowed_users WHERE discord_user_id = ?", (discord_user_id,)
+        )
+        await conn.commit()
+        return cursor.rowcount > 0
+
+
+async def update_allowed_user_name(discord_user_id: str, display_name: str) -> None:
+    """表示名を更新（ログイン時に呼ぶ）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE allowed_users SET display_name = ? WHERE discord_user_id = ?",
+            (display_name, discord_user_id),
         )
         await conn.commit()
 

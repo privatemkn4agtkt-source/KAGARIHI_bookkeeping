@@ -37,16 +37,13 @@ load_dotenv()
 # ─────────────────────────────────────────────────────────
 # 設定
 # ─────────────────────────────────────────────────────────
-DB_PATH             = os.getenv("DB_PATH", "bookkeeping.db")
-CLIENT_ID           = os.getenv("DISCORD_CLIENT_ID", "")
-CLIENT_SECRET       = os.getenv("DISCORD_CLIENT_SECRET", "")
-REDIRECT_URI        = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8000/auth/callback")
-SESSION_SECRET      = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
-DASHBOARD_PORT      = int(os.getenv("DASHBOARD_PORT", "8000"))
-
-# 許可ユーザーIDのセット (空なら全員拒否)
-_raw_ids = os.getenv("ALLOWED_DISCORD_IDS", "")
-ALLOWED_IDS: set[str] = {uid.strip() for uid in _raw_ids.split(",") if uid.strip()}
+DB_PATH        = os.getenv("DB_PATH", "bookkeeping.db")
+CLIENT_ID      = os.getenv("DISCORD_CLIENT_ID", "")
+CLIENT_SECRET  = os.getenv("DISCORD_CLIENT_SECRET", "")
+REDIRECT_URI   = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8000/auth/callback")
+SESSION_SECRET = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
+DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8000"))
+# ALLOWED_DISCORD_IDS は init_db() で DB に自動シードされるので env は直接参照しない
 
 DISCORD_API    = "https://discord.com/api/v10"
 DISCORD_OAUTH2 = "https://discord.com/oauth2/authorize"
@@ -85,41 +82,19 @@ def get_current_user(request: Request) -> dict | None:
     return request.session.get("user")
 
 
-def require_auth(request: Request) -> dict:
-    """
-    ログイン済み かつ 許可IDリストに含まれる場合のみ通過。
-    それ以外はログインページへリダイレクト (例外で返す)。
-    """
-    user = get_current_user(request)
-    if user is None:
-        # ログイン後に元のページへ戻れるよう next パラメータを保持
-        request.session["next"] = str(request.url)
-        raise _redirect("/auth/login")
-    if ALLOWED_IDS and user["id"] not in ALLOWED_IDS:
-        raise _redirect("/auth/denied")
-    return user
-
-
-class _redirect(Exception):
-    """FastAPI の依存関係内でリダイレクトを発生させるための例外"""
-    def __init__(self, url: str):
-        self.url = url
-
-
 from fastapi import HTTPException
-from starlette.responses import Response
 
 
 async def auth_guard(request: Request) -> dict:
     """全保護ページに付ける依存関係"""
-    try:
-        return require_auth(request)
-    except _redirect as e:
-        # 依存関係からリダイレクトを返す唯一の方法: 例外を HTTPException に変換
-        # ただし FastAPI では依存関係から Response を返せないため、
-        # ここでは request.state にフラグを立て、ルートハンドラ側でチェックする。
-        # → より簡潔な方法: middleware で処理する
-        raise HTTPException(status_code=307, headers={"Location": e.url})
+    user = get_current_user(request)
+    if user is None:
+        request.session["next"] = str(request.url)
+        raise HTTPException(status_code=307, headers={"Location": "/auth/login"})
+    # DBをリクエストごとに参照（再起動なしで許可変更が反映される）
+    if not await db.is_allowed_user(user["id"]):
+        raise HTTPException(status_code=307, headers={"Location": "/auth/denied"})
+    return user
 
 
 # ─────────────────────────────────────────────────────────
@@ -189,17 +164,21 @@ async def oauth_callback(request: Request, code: str = Query(None), state: str =
         return HTMLResponse("<h2>❌ ユーザー情報取得失敗</h2>", status_code=500)
 
     user = user_resp.json()
+    display_name = user.get("global_name") or user["username"]
     # セッションに必要な情報だけ保存
     request.session["user"] = {
-        "id":            user["id"],
-        "username":      user["username"],
-        "global_name":   user.get("global_name") or user["username"],
-        "avatar":        user.get("avatar"),
+        "id":          user["id"],
+        "username":    user["username"],
+        "global_name": display_name,
+        "avatar":      user.get("avatar"),
     }
 
-    # 許可チェック
-    if ALLOWED_IDS and user["id"] not in ALLOWED_IDS:
+    # 許可チェック（DB参照）
+    if not await db.is_allowed_user(user["id"]):
         return RedirectResponse("/auth/denied", status_code=302)
+
+    # 許可済みなら表示名をDBに記録（名前変更対応）
+    await db.update_allowed_user_name(user["id"], display_name)
 
     next_url = request.session.pop("next", "/")
     return RedirectResponse(next_url, status_code=302)

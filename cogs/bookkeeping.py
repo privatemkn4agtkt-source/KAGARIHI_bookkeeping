@@ -1541,6 +1541,116 @@ class Bookkeeping(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     # =========================================================================
+    # ダッシュボード閲覧権限管理
+    # =========================================================================
+
+    async def _is_dashboard_allowed(self, discord_user_id: str) -> bool:
+        """コマンド実行者がダッシュボード許可リストに含まれているか確認"""
+        return await db.is_allowed_user(discord_user_id)
+
+    @app_commands.command(name="ダッシュボード許可追加", description="指定した Discord ID にダッシュボードの閲覧権限を付与します（許可済みユーザーのみ実行可）")
+    @app_commands.describe(
+        discord_id="追加するユーザーの Discord ID（18桁の数字）",
+        表示名="分かりやすい名前（例: 田中ボーカル）省略可",
+    )
+    async def dashboard_allow_add(
+        self,
+        interaction: discord.Interaction,
+        discord_id: str,
+        表示名: str = "",
+    ):
+        # 実行者が許可済みか確認
+        if not await self._is_dashboard_allowed(str(interaction.user.id)):
+            await interaction.response.send_message(
+                "❌ このコマンドはダッシュボードの閲覧権限を持つユーザーのみ実行できます。",
+                ephemeral=True,
+            )
+            return
+
+        # IDが数字のみかバリデーション
+        if not discord_id.strip().isdigit():
+            await interaction.response.send_message(
+                "❌ Discord ID は数字のみで入力してください（例: `682574338175664404`）。",
+                ephemeral=True,
+            )
+            return
+
+        discord_id = discord_id.strip()
+        name = 表示名 or discord_id
+        added_by = f"{interaction.user.display_name}（{interaction.user.id}）"
+        ok = await db.add_allowed_user(discord_id, name, added_by)
+
+        if ok:
+            embed = discord.Embed(
+                title="✅ ダッシュボード権限を追加しました",
+                color=discord.Color.green(),
+            )
+            embed.add_field(name="Discord ID", value=f"`{discord_id}`", inline=True)
+            embed.add_field(name="表示名", value=name, inline=True)
+            embed.add_field(name="追加者", value=interaction.user.display_name, inline=True)
+            embed.set_footer(text="次回ログイン時から有効になります")
+            await interaction.response.send_message(embed=embed)
+        else:
+            await interaction.response.send_message(
+                f"⚠️ Discord ID `{discord_id}` はすでに許可リストに登録されています。",
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="ダッシュボード許可削除", description="指定した Discord ID のダッシュボード閲覧権限を削除します（許可済みユーザーのみ実行可）")
+    @app_commands.describe(discord_id="削除するユーザーの Discord ID")
+    async def dashboard_allow_remove(
+        self,
+        interaction: discord.Interaction,
+        discord_id: str,
+    ):
+        if not await self._is_dashboard_allowed(str(interaction.user.id)):
+            await interaction.response.send_message(
+                "❌ このコマンドはダッシュボードの閲覧権限を持つユーザーのみ実行できます。",
+                ephemeral=True,
+            )
+            return
+
+        discord_id = discord_id.strip()
+
+        # 自分自身の削除を防止
+        if discord_id == str(interaction.user.id):
+            await interaction.response.send_message(
+                "❌ 自分自身の権限は削除できません。他のメンバーに依頼してください。",
+                ephemeral=True,
+            )
+            return
+
+        ok = await db.remove_allowed_user(discord_id)
+        if ok:
+            await interaction.response.send_message(
+                f"✅ Discord ID `{discord_id}` のダッシュボード権限を削除しました。",
+            )
+        else:
+            await interaction.response.send_message(
+                f"❌ Discord ID `{discord_id}` は許可リストに見つかりません。",
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="ダッシュボード許可一覧", description="ダッシュボードの閲覧権限を持つユーザー一覧を表示します")
+    async def dashboard_allow_list(self, interaction: discord.Interaction):
+        users = await db.get_allowed_users()
+        if not users:
+            await interaction.response.send_message("許可ユーザーが登録されていません。", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"🔑 ダッシュボード閲覧権限一覧（{len(users)} 名）",
+            color=discord.Color.blurple(),
+        )
+        lines = []
+        for u in users:
+            name = u["display_name"] or u["discord_user_id"]
+            added = u["added_by"] or "不明"
+            lines.append(f"`{u['discord_user_id']}` **{name}** — 追加者: {added}（{u['added_at'][:10]}）")
+        embed.description = "\n".join(lines)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # =========================================================================
     # デモデータ投入
     # =========================================================================
 
