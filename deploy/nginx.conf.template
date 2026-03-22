@@ -1,0 +1,60 @@
+# =============================================================================
+# Nginx リバースプロキシ設定テンプレート
+# gcp_server_setup.sh が YOUR_DOMAIN を実際のドメインに置換して使用します
+# 手動で使う場合: YOUR_DOMAIN を実際のドメインに置き換えてください
+# =============================================================================
+
+# HTTP → HTTPS リダイレクト
+server {
+    listen 80;
+    listen [::]:80;
+    server_name YOUR_DOMAIN;
+
+    # Let's Encrypt 認証用（certbot が自動管理）
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name YOUR_DOMAIN;
+
+    # SSL 証明書（certbot が自動設定）
+    ssl_certificate     /etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem;
+    include             /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
+
+    # セキュリティヘッダー
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    # アクセスログ
+    access_log /var/log/nginx/kagarihi_access.log;
+    error_log  /var/log/nginx/kagarihi_error.log;
+
+    # ダッシュボードへのプロキシ
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+
+        # ヘッダー転送（OAuth2 リダイレクト URI の https 判定に必要）
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # タイムアウト
+        proxy_connect_timeout 60s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    60s;
+    }
+}
