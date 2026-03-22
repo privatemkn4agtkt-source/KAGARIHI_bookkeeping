@@ -193,7 +193,15 @@ async def get_accounts() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT name, account_type FROM accounts ORDER BY account_type, name"
+            """SELECT name, account_type FROM accounts
+               ORDER BY CASE account_type
+                   WHEN '資産' THEN 1
+                   WHEN '負債' THEN 2
+                   WHEN '資本' THEN 3
+                   WHEN '収益' THEN 4
+                   WHEN '費用' THEN 5
+                   ELSE 6
+               END, name"""
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
