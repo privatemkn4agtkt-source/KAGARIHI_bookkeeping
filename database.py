@@ -183,6 +183,83 @@ async def delete_journal_entry(entry_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+async def get_journal_entry(entry_id: int) -> dict | None:
+    """指定IDの仕訳を1件返す"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag FROM journal_entries WHERE id = ?",
+            (entry_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def update_journal_entry(
+    entry_id: int,
+    entry_date: str,
+    debit_account: str,
+    credit_account: str,
+    amount: int,
+    description: str,
+    event_tag: str | None,
+) -> bool:
+    """仕訳を上書き編集する"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE journal_entries
+               SET entry_date=?, debit_account=?, credit_account=?, amount=?, description=?, event_tag=?
+               WHERE id=?""",
+            (entry_date, debit_account, credit_account, amount, description, event_tag, entry_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def update_journal_entry_tag(entry_id: int, event_tag: str | None) -> bool:
+    """仕訳のイベントタグだけを変更する"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE journal_entries SET event_tag=? WHERE id=?",
+            (event_tag, entry_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_journal_entries_filtered(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    account: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """日付範囲・勘定科目でフィルタした仕訳一覧"""
+    conditions = []
+    params: list = []
+    if start_date:
+        conditions.append("entry_date >= ?")
+        params.append(start_date)
+    if end_date:
+        conditions.append("entry_date <= ?")
+        params.append(end_date)
+    if account:
+        conditions.append("(debit_account = ? OR credit_account = ?)")
+        params.extend([account, account])
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params.append(limit)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            f"""SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag
+               FROM journal_entries {where}
+               ORDER BY entry_date DESC, id DESC LIMIT ?""",
+            params,
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+
 # =============================================================================
 # 試算表
 # =============================================================================
@@ -518,6 +595,23 @@ async def get_cash_flow(period: str | None = None) -> dict:
 # メンバー
 # =============================================================================
 
+async def delete_account(name: str) -> tuple[bool, str]:
+    """勘定科目を削除する。仕訳で使用中の場合は失敗する"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            "SELECT COUNT(*) FROM journal_entries WHERE debit_account=? OR credit_account=?",
+            (name, name),
+        ) as cursor:
+            count = (await cursor.fetchone())[0]
+        if count > 0:
+            return False, f"この科目は {count} 件の仕訳で使用中のため削除できません"
+        cursor = await conn.execute("DELETE FROM accounts WHERE name=?", (name,))
+        await conn.commit()
+        if cursor.rowcount == 0:
+            return False, "科目が見つかりません"
+        return True, ""
+
+
 async def add_member(name: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as conn:
         try:
@@ -532,6 +626,21 @@ async def get_members() -> list[str]:
     async with aiosqlite.connect(DB_PATH) as conn:
         async with conn.execute("SELECT name FROM members ORDER BY name") as cursor:
             return [r[0] for r in await cursor.fetchall()]
+
+
+async def delete_member(name: str) -> tuple[bool, str]:
+    """メンバーを削除する。未精算の立替がある場合は警告を返す（削除は続行）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            "SELECT COUNT(*) FROM advances WHERE paid_by=? AND settled=0", (name,)
+        ) as cursor:
+            unsettled = (await cursor.fetchone())[0]
+        cursor = await conn.execute("DELETE FROM members WHERE name=?", (name,))
+        await conn.commit()
+        if cursor.rowcount == 0:
+            return False, "メンバーが見つかりません"
+        warning = f"（未精算立替 {unsettled} 件あり）" if unsettled > 0 else ""
+        return True, warning
 
 
 async def member_exists(name: str) -> bool:
@@ -576,6 +685,63 @@ async def settle_advance(advance_id: int) -> bool:
 # =============================================================================
 # 予算
 # =============================================================================
+
+async def get_yearly_summary(year: str) -> list[dict]:
+    """年次集計: 各月の収益・費用・純利益を返す"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        months = [f"{year}-{m:02d}" for m in range(1, 13)]
+        result = []
+        for ym in months:
+            async with conn.execute(
+                """
+                SELECT je.*, a_d.account_type AS debit_type, a_c.account_type AS credit_type
+                FROM journal_entries je
+                LEFT JOIN accounts a_d ON je.debit_account = a_d.name
+                LEFT JOIN accounts a_c ON je.credit_account = a_c.name
+                WHERE je.entry_date LIKE ?
+                """,
+                (ym + "%",),
+            ) as cursor:
+                entries = [dict(r) for r in await cursor.fetchall()]
+            rev = sum(e["amount"] for e in entries if e["credit_type"] == "収益")
+            exp = sum(e["amount"] for e in entries if e["debit_type"] == "費用")
+            result.append({"month": ym, "revenue": rev, "expense": exp, "net": rev - exp})
+        return result
+
+
+async def get_period_comparison(period1: str, period2: str) -> dict:
+    """2期間の収支比較。period: 'YYYY-MM' または 'YYYY'"""
+    async def _summary(period: str) -> dict:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                """
+                SELECT je.*, a_d.account_type AS debit_type, a_c.account_type AS credit_type
+                FROM journal_entries je
+                LEFT JOIN accounts a_d ON je.debit_account = a_d.name
+                LEFT JOIN accounts a_c ON je.credit_account = a_c.name
+                WHERE je.entry_date LIKE ?
+                """,
+                (period + "%",),
+            ) as cursor:
+                entries = [dict(r) for r in await cursor.fetchall()]
+        revenues: dict[str, int] = {}
+        expenses: dict[str, int] = {}
+        for e in entries:
+            if e["credit_type"] == "収益":
+                revenues[e["credit_account"]] = revenues.get(e["credit_account"], 0) + e["amount"]
+            if e["debit_type"] == "費用":
+                expenses[e["debit_account"]] = expenses.get(e["debit_account"], 0) + e["amount"]
+        total_rev = sum(revenues.values())
+        total_exp = sum(expenses.values())
+        return {"period": period, "revenues": revenues, "expenses": expenses,
+                "total_revenue": total_rev, "total_expense": total_exp, "net": total_rev - total_exp}
+
+    s1 = await _summary(period1)
+    s2 = await _summary(period2)
+    return {"period1": s1, "period2": s2}
+
 
 async def set_budget(account_name: str, period: str, amount: int) -> None:
     async with aiosqlite.connect(DB_PATH) as conn:

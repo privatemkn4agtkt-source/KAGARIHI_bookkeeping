@@ -1,3 +1,6 @@
+import csv
+import io
+import os
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -41,6 +44,73 @@ def _storage_embed(info: dict) -> discord.Embed:
     embed.add_field(name="DBファイルサイズ", value=fmt_bytes(info["db_size"]), inline=True)
     embed.add_field(name="仕訳件数", value=f"{info['entry_count']:,} 件", inline=True)
     return embed
+
+
+# =============================================================================
+# 仕訳記録後のキャンセルボタン（60秒以内に取り消し可能）
+# =============================================================================
+
+class CancelEntryView(discord.ui.View):
+    def __init__(self, entry_id: int, author_id: int):
+        super().__init__(timeout=60)
+        self.entry_id = entry_id
+        self.author_id = author_id
+
+    @discord.ui.button(label="🗑️ 取り消す", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("取り消しは記録した本人のみ行えます。", ephemeral=True)
+            return
+        success = await db.delete_journal_entry(self.entry_id)
+        for item in self.children:
+            item.disabled = True
+        if success:
+            await interaction.response.edit_message(
+                content=f"🗑️ 仕訳 **#{self.entry_id:04d}** を取り消しました。",
+                embed=None,
+                view=None,
+            )
+        else:
+            await interaction.response.edit_message(
+                content=f"❌ 仕訳 #{self.entry_id:04d} の取り消しに失敗しました（すでに削除済みかもしれません）。",
+                embed=None,
+                view=None,
+            )
+        self.stop()
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+# =============================================================================
+# 仕訳削除確認ビュー
+# =============================================================================
+
+class ConfirmDeleteEntryView(discord.ui.View):
+    def __init__(self, entry: dict):
+        super().__init__(timeout=30)
+        self.entry = entry
+
+    @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        success = await db.delete_journal_entry(self.entry["id"])
+        if success:
+            await interaction.response.edit_message(
+                content=f"✅ 仕訳 **#{self.entry['id']:04d}** を削除しました。", view=None
+            )
+        else:
+            await interaction.response.edit_message(content="❌ 削除に失敗しました。", view=None)
+        self.stop()
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="キャンセルしました。", view=None)
+        self.stop()
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
 
 
 # =============================================================================
@@ -202,28 +272,59 @@ class Bookkeeping(commands.Cog):
 
         entry_id = await db.add_journal_entry(entry_date, 借方, 貸方, 金額, 摘要, イベント)
 
-        embed = discord.Embed(title="✅ 仕訳を記録しました", color=discord.Color.green())
-        embed.add_field(name="ID", value=str(entry_id), inline=True)
+        embed = discord.Embed(
+            title=f"✅ 仕訳 #{entry_id:04d} を記録しました",
+            color=discord.Color.green(),
+        )
         embed.add_field(name="日付", value=entry_date, inline=True)
         embed.add_field(name="金額", value=fmt_amount(金額), inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="借方", value=借方, inline=True)
         embed.add_field(name="貸方", value=貸方, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="摘要", value=摘要, inline=False)
         if イベント:
             embed.add_field(name="イベント", value=イベント, inline=True)
-        await interaction.response.send_message(embed=embed)
+        embed.set_footer(text=f"入力ミスは「取り消す」ボタン、または /仕訳削除 {entry_id} で取り消せます（60秒以内はボタンで即時取り消し）")
+        view = CancelEntryView(entry_id, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view)
 
     # -------------------------------------------------------------------------
     # /仕訳帳
     # -------------------------------------------------------------------------
-    @app_commands.command(name="仕訳帳", description="最近の仕訳を一覧表示します")
-    @app_commands.describe(件数="表示件数（デフォルト: 10、最大: 50）")
-    async def journal(self, interaction: discord.Interaction, 件数: int = 10):
+    @app_commands.command(name="仕訳帳", description="仕訳を一覧表示します（日付・科目・件数で絞り込み可）")
+    @app_commands.describe(
+        件数="表示件数（デフォルト: 10、最大: 50）",
+        開始日="絞り込み開始日 YYYY-MM-DD",
+        終了日="絞り込み終了日 YYYY-MM-DD",
+        勘定科目="この科目が借方または貸方の仕訳だけ表示",
+    )
+    @app_commands.autocomplete(勘定科目=_account_autocomplete)
+    async def journal(
+        self,
+        interaction: discord.Interaction,
+        件数: int = 10,
+        開始日: str | None = None,
+        終了日: str | None = None,
+        勘定科目: str | None = None,
+    ):
         件数 = min(max(件数, 1), 50)
-        entries = await db.get_journal_entries(件数)
+
+        for d in [開始日, 終了日]:
+            if d:
+                try:
+                    date.fromisoformat(d)
+                except ValueError:
+                    await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
+                    return
+
+        if 開始日 or 終了日 or 勘定科目:
+            entries = await db.get_journal_entries_filtered(開始日, 終了日, 勘定科目, 件数)
+        else:
+            entries = await db.get_journal_entries(件数)
 
         if not entries:
-            await interaction.response.send_message("仕訳がまだありません。", ephemeral=True)
+            await interaction.response.send_message("該当する仕訳がありません。", ephemeral=True)
             return
 
         lines = []
@@ -235,8 +336,17 @@ class Bookkeeping(commands.Cog):
                 f"{fmt_amount(e['amount'])}　{e['description']}{event_str}"
             )
 
+        filter_desc = []
+        if 開始日:
+            filter_desc.append(f"{開始日}〜")
+        if 終了日:
+            filter_desc.append(f"〜{終了日}")
+        if 勘定科目:
+            filter_desc.append(勘定科目)
+        title_suffix = f"（{' '.join(filter_desc)}）" if filter_desc else f"（直近 {len(entries)} 件）"
+
         embed = discord.Embed(
-            title=f"📒 仕訳帳（直近 {len(entries)} 件）",
+            title=f"📒 仕訳帳{title_suffix}",
             description=_truncate("\n".join(lines), 4000),
             color=discord.Color.blue(),
         )
@@ -629,6 +739,17 @@ class Bookkeeping(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ 「{名前}」はすでに登録されています。", ephemeral=True)
 
+    @app_commands.command(name="メンバー削除", description="バンドメンバーを削除します")
+    @app_commands.describe(名前="削除するメンバー名")
+    @app_commands.autocomplete(名前=_member_autocomplete)
+    async def delete_member(self, interaction: discord.Interaction, 名前: str):
+        success, warning = await db.delete_member(名前)
+        if success:
+            msg = f"✅ メンバー「{名前}」を削除しました。{warning}"
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ {warning}", ephemeral=True)
+
     @app_commands.command(name="メンバー一覧", description="バンドメンバーを一覧表示します")
     async def list_members(self, interaction: discord.Interaction):
         members = await db.get_members()
@@ -651,8 +772,9 @@ class Bookkeeping(commands.Cog):
         金額="立替金額（円）",
         摘要="内容（例: スタジオ代）",
         日付="立替日 YYYY-MM-DD（省略時は今日）",
+        費用科目="指定すると「費用科目 / 未払金」の仕訳も自動作成します",
     )
-    @app_commands.autocomplete(メンバー=_member_autocomplete)
+    @app_commands.autocomplete(メンバー=_member_autocomplete, 費用科目=_account_autocomplete)
     async def record_advance(
         self,
         interaction: discord.Interaction,
@@ -660,6 +782,7 @@ class Bookkeeping(commands.Cog):
         金額: int,
         摘要: str,
         日付: str | None = None,
+        費用科目: str | None = None,
     ):
         if 金額 <= 0:
             await interaction.response.send_message("金額は1以上の整数を指定してください。", ephemeral=True)
@@ -670,14 +793,25 @@ class Bookkeeping(commands.Cog):
         except ValueError:
             await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
             return
+        if 費用科目 and not await db.account_exists(費用科目):
+            await interaction.response.send_message(f"勘定科目「{費用科目}」は登録されていません。", ephemeral=True)
+            return
 
         advance_id = await db.add_advance(メンバー, 金額, 摘要, entry_date)
-        embed = discord.Embed(title="✅ 立替を記録しました", color=discord.Color.green())
-        embed.add_field(name="ID", value=str(advance_id), inline=True)
+        embed = discord.Embed(title=f"✅ 立替 #{advance_id:04d} を記録しました", color=discord.Color.green())
         embed.add_field(name="立替者", value=メンバー, inline=True)
         embed.add_field(name="金額", value=fmt_amount(金額), inline=True)
-        embed.add_field(name="内容", value=摘要, inline=True)
         embed.add_field(name="日付", value=entry_date, inline=True)
+        embed.add_field(name="内容", value=摘要, inline=False)
+
+        if 費用科目:
+            entry_id = await db.add_journal_entry(entry_date, 費用科目, "未払金", 金額, f"【立替#{advance_id:04d}】{摘要}")
+            embed.add_field(
+                name="仕訳も自動作成",
+                value=f"仕訳 #{entry_id:04d}　{費用科目} / 未払金　{fmt_amount(金額)}",
+                inline=False,
+            )
+        embed.set_footer(text=f"精算時は /立替精算済み {advance_id} を使用してください")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="立替精算表", description="未精算の立替一覧を表示します")
@@ -707,19 +841,137 @@ class Bookkeeping(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="立替精算済み", description="指定した立替を精算済みにします")
-    @app_commands.describe(立替ID="精算済みにする立替のID（/立替精算表 で確認）")
-    async def settle_advance(self, interaction: discord.Interaction, 立替ID: int):
-        success = await db.settle_advance(立替ID)
-        if success:
-            await interaction.response.send_message(f"✅ 立替 #{立替ID:04d} を精算済みにしました。", ephemeral=True)
-        else:
+    @app_commands.describe(
+        立替ID="精算済みにする立替のID（/立替精算表 で確認）",
+        仕訳作成="Trueにすると「未払金 / 現金」の精算仕訳も自動作成します",
+    )
+    async def settle_advance(
+        self,
+        interaction: discord.Interaction,
+        立替ID: int,
+        仕訳作成: bool = False,
+    ):
+        advances = await db.get_advances(settled=False)
+        target = next((a for a in advances if a["id"] == 立替ID), None)
+        if not target:
             await interaction.response.send_message(
                 f"❌ 立替 #{立替ID:04d} が見つからないか、すでに精算済みです。", ephemeral=True
             )
+            return
+
+        success = await db.settle_advance(立替ID)
+        if not success:
+            await interaction.response.send_message(f"❌ 精算処理に失敗しました。", ephemeral=True)
+            return
+
+        msg = f"✅ 立替 #{立替ID:04d}（{target['paid_by']} / {fmt_amount(target['amount'])} / {target['description']}）を精算済みにしました。"
+        if 仕訳作成:
+            entry_id = await db.add_journal_entry(
+                str(date.today()), "未払金", "現金",
+                target["amount"], f"【立替#{立替ID:04d}精算】{target['description']}",
+            )
+            msg += f"\n仕訳 #{entry_id:04d}　未払金 / 現金　{fmt_amount(target['amount'])} も作成しました。"
+        await interaction.response.send_message(msg, ephemeral=True)
 
     # =========================================================================
     # 勘定科目管理
     # =========================================================================
+
+    @app_commands.command(name="年次集計", description="指定年の月別収支を一覧表示します")
+    @app_commands.describe(年="対象年 YYYY（省略時: 今年）")
+    async def yearly_summary(self, interaction: discord.Interaction, 年: str | None = None):
+        year = 年 or str(date.today().year)
+        if not year.isdigit() or len(year) != 4:
+            await interaction.response.send_message("年は YYYY 形式で入力してください。", ephemeral=True)
+            return
+
+        rows = await db.get_yearly_summary(year)
+        total_rev = sum(r["revenue"] for r in rows)
+        total_exp = sum(r["expense"] for r in rows)
+
+        lines = []
+        for r in rows:
+            if r["revenue"] == 0 and r["expense"] == 0:
+                continue
+            sign = "+" if r["net"] >= 0 else ""
+            lines.append(
+                f"`{r['month']}` 収益 {fmt_amount(r['revenue'])}　費用 {fmt_amount(r['expense'])}　"
+                f"**{sign}{fmt_amount(r['net'])}**"
+            )
+
+        if not lines:
+            await interaction.response.send_message(f"{year} 年の仕訳がありません。", ephemeral=True)
+            return
+
+        net = total_rev - total_exp
+        embed = discord.Embed(
+            title=f"📅 {year}年 年次集計",
+            description=_truncate("\n".join(lines), 4000),
+            color=discord.Color.green() if net >= 0 else discord.Color.red(),
+        )
+        embed.add_field(name="年間収益合計", value=fmt_amount(total_rev), inline=True)
+        embed.add_field(name="年間費用合計", value=fmt_amount(total_exp), inline=True)
+        sign = "+" if net >= 0 else ""
+        embed.add_field(name="年間純利益" if net >= 0 else "年間純損失", value=f"**{sign}{fmt_amount(net)}**", inline=True)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="収支比較", description="2つの期間の収支を比較します")
+    @app_commands.describe(
+        期間1="比較する期間1 YYYY-MM または YYYY",
+        期間2="比較する期間2 YYYY-MM または YYYY",
+    )
+    async def period_comparison(self, interaction: discord.Interaction, 期間1: str, 期間2: str):
+        result = await db.get_period_comparison(期間1, 期間2)
+        s1 = result["period1"]
+        s2 = result["period2"]
+
+        all_rev_keys = sorted(set(list(s1["revenues"].keys()) + list(s2["revenues"].keys())))
+        all_exp_keys = sorted(set(list(s1["expenses"].keys()) + list(s2["expenses"].keys())))
+
+        def diff_str(v1: int, v2: int) -> str:
+            diff = v2 - v1
+            sign = "+" if diff >= 0 else ""
+            return f"({sign}{fmt_amount(diff)})"
+
+        rev_lines = []
+        for k in all_rev_keys:
+            v1, v2 = s1["revenues"].get(k, 0), s2["revenues"].get(k, 0)
+            rev_lines.append(f"　{k}: {fmt_amount(v1)} → {fmt_amount(v2)} {diff_str(v1, v2)}")
+        exp_lines = []
+        for k in all_exp_keys:
+            v1, v2 = s1["expenses"].get(k, 0), s2["expenses"].get(k, 0)
+            exp_lines.append(f"　{k}: {fmt_amount(v1)} → {fmt_amount(v2)} {diff_str(v1, v2)}")
+
+        embed = discord.Embed(
+            title=f"📊 収支比較: {期間1} vs {期間2}",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(
+            name="【収益】",
+            value=_truncate("\n".join(rev_lines) or "　（なし）"),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"収益合計: {fmt_amount(s1['total_revenue'])} → {fmt_amount(s2['total_revenue'])} {diff_str(s1['total_revenue'], s2['total_revenue'])}",
+            value="\u200b",
+            inline=False,
+        )
+        embed.add_field(
+            name="【費用】",
+            value=_truncate("\n".join(exp_lines) or "　（なし）"),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"費用合計: {fmt_amount(s1['total_expense'])} → {fmt_amount(s2['total_expense'])} {diff_str(s1['total_expense'], s2['total_expense'])}",
+            value="\u200b",
+            inline=False,
+        )
+        embed.add_field(
+            name=f"純利益: {fmt_amount(s1['net'])} → {fmt_amount(s2['net'])} {diff_str(s1['net'], s2['net'])}",
+            value="\u200b",
+            inline=False,
+        )
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="勘定科目一覧", description="登録されている勘定科目を一覧表示します")
     async def list_accounts(self, interaction: discord.Interaction):
@@ -737,6 +989,16 @@ class Bookkeeping(commands.Cog):
             if names:
                 embed.add_field(name=f"【{t}】", value="、".join(names), inline=False)
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="勘定科目削除", description="勘定科目を削除します（仕訳で使用中の科目は削除不可）")
+    @app_commands.describe(名前="削除する勘定科目名")
+    @app_commands.autocomplete(名前=_account_autocomplete)
+    async def delete_account(self, interaction: discord.Interaction, 名前: str):
+        success, reason = await db.delete_account(名前)
+        if success:
+            await interaction.response.send_message(f"✅ 勘定科目「{名前}」を削除しました。", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ 削除できません: {reason}", ephemeral=True)
 
     @app_commands.command(name="勘定科目追加", description="新しい勘定科目を追加します")
     @app_commands.describe(名前="勘定科目名", 種別="勘定科目の種別")
@@ -762,14 +1024,173 @@ class Bookkeeping(commands.Cog):
     # 仕訳削除・ストレージ確認
     # =========================================================================
 
-    @app_commands.command(name="仕訳削除", description="指定したIDの仕訳を削除します")
+    @app_commands.command(name="仕訳削除", description="指定したIDの仕訳を削除します（確認あり）")
     @app_commands.describe(仕訳ID="削除する仕訳のID（/仕訳帳 で確認できます）")
     async def delete_entry(self, interaction: discord.Interaction, 仕訳ID: int):
-        deleted = await db.delete_journal_entry(仕訳ID)
-        if deleted:
-            await interaction.response.send_message(f"✅ 仕訳 #{仕訳ID:04d} を削除しました。", ephemeral=True)
-        else:
+        entry = await db.get_journal_entry(仕訳ID)
+        if not entry:
             await interaction.response.send_message(f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True)
+            return
+
+        event_str = f"\nイベント: {entry['event_tag']}" if entry.get("event_tag") else ""
+        content = (
+            f"以下の仕訳を削除しますか？\n"
+            f"**#{entry['id']:04d}** {entry['entry_date']}　"
+            f"**{entry['debit_account']}** / **{entry['credit_account']}**　"
+            f"{fmt_amount(entry['amount'])}　{entry['description']}{event_str}"
+        )
+        view = ConfirmDeleteEntryView(entry)
+        await interaction.response.send_message(content, view=view, ephemeral=True)
+
+    @app_commands.command(name="エクスポート", description="仕訳帳をCSVファイルとして出力します")
+    @app_commands.describe(
+        開始日="出力開始日 YYYY-MM-DD（省略時: 全期間）",
+        終了日="出力終了日 YYYY-MM-DD（省略時: 全期間）",
+    )
+    async def export_csv(
+        self,
+        interaction: discord.Interaction,
+        開始日: str | None = None,
+        終了日: str | None = None,
+    ):
+        for d in [開始日, 終了日]:
+            if d:
+                try:
+                    date.fromisoformat(d)
+                except ValueError:
+                    await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
+                    return
+
+        entries = await db.get_journal_entries_filtered(開始日, 終了日, None, limit=10000)
+        if not entries:
+            await interaction.response.send_message("出力する仕訳がありません。", ephemeral=True)
+            return
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["ID", "日付", "借方", "貸方", "金額", "摘要", "イベント"])
+        for e in sorted(entries, key=lambda x: (x["entry_date"], x["id"])):
+            writer.writerow([
+                e["id"], e["entry_date"], e["debit_account"],
+                e["credit_account"], e["amount"], e["description"],
+                e.get("event_tag") or "",
+            ])
+
+        buf.seek(0)
+        period_str = ""
+        if 開始日 or 終了日:
+            period_str = f"_{開始日 or ''}_{終了日 or ''}"
+        filename = f"仕訳帳{period_str}_{date.today()}.csv"
+        file = discord.File(fp=io.BytesIO(buf.getvalue().encode("utf-8-sig")), filename=filename)
+        await interaction.response.send_message(
+            f"✅ {len(entries)} 件をCSVで出力しました。",
+            file=file,
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="バックアップ", description="DBファイルをこのチャンネルに送信してバックアップします")
+    async def backup(self, interaction: discord.Interaction):
+        import database as dbmod
+        db_path = os.path.abspath(dbmod.DB_PATH)
+        if not os.path.exists(db_path):
+            await interaction.response.send_message("DBファイルが見つかりません。", ephemeral=True)
+            return
+        file = discord.File(fp=db_path, filename=f"bookkeeping_backup_{date.today()}.db")
+        await interaction.response.send_message(
+            f"💾 DBバックアップ（{date.today()}）",
+            file=file,
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="仕訳編集", description="既存の仕訳を編集します")
+    @app_commands.describe(
+        仕訳ID="編集する仕訳のID",
+        借方="新しい借方勘定科目",
+        貸方="新しい貸方勘定科目",
+        金額="新しい金額",
+        摘要="新しい摘要",
+        日付="新しい日付 YYYY-MM-DD",
+        イベント="新しいイベントタグ（空文字で解除）",
+    )
+    @app_commands.autocomplete(借方=_account_autocomplete, 貸方=_account_autocomplete, イベント=_event_autocomplete)
+    async def edit_entry(
+        self,
+        interaction: discord.Interaction,
+        仕訳ID: int,
+        借方: str | None = None,
+        貸方: str | None = None,
+        金額: int | None = None,
+        摘要: str | None = None,
+        日付: str | None = None,
+        イベント: str | None = None,
+    ):
+        entry = await db.get_journal_entry(仕訳ID)
+        if not entry:
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True)
+            return
+
+        new_debit   = 借方 or entry["debit_account"]
+        new_credit  = 貸方 or entry["credit_account"]
+        new_amount  = 金額 if 金額 is not None else entry["amount"]
+        new_desc    = 摘要 or entry["description"]
+        new_date    = 日付 or entry["entry_date"]
+        new_tag     = (イベント if イベント != "" else None) if イベント is not None else entry["event_tag"]
+
+        if new_amount <= 0:
+            await interaction.response.send_message("金額は1以上の整数を指定してください。", ephemeral=True)
+            return
+        try:
+            date.fromisoformat(new_date)
+        except ValueError:
+            await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
+            return
+        if not await db.account_exists(new_debit):
+            await interaction.response.send_message(f"勘定科目「{new_debit}」は登録されていません。", ephemeral=True)
+            return
+        if not await db.account_exists(new_credit):
+            await interaction.response.send_message(f"勘定科目「{new_credit}」は登録されていません。", ephemeral=True)
+            return
+        if new_tag and not await db.event_exists(new_tag):
+            await interaction.response.send_message(f"イベント「{new_tag}」は登録されていません。", ephemeral=True)
+            return
+
+        await db.update_journal_entry(仕訳ID, new_date, new_debit, new_credit, new_amount, new_desc, new_tag)
+
+        embed = discord.Embed(title=f"✏️ 仕訳 #{仕訳ID:04d} を編集しました", color=discord.Color.orange())
+        embed.add_field(name="日付", value=new_date, inline=True)
+        embed.add_field(name="金額", value=fmt_amount(new_amount), inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="借方", value=new_debit, inline=True)
+        embed.add_field(name="貸方", value=new_credit, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="摘要", value=new_desc, inline=False)
+        if new_tag:
+            embed.add_field(name="イベント", value=new_tag, inline=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="仕訳タグ変更", description="仕訳のイベントタグを後から変更・解除します")
+    @app_commands.describe(
+        仕訳ID="変更する仕訳のID",
+        イベント="新しいイベント名（空欄で解除）",
+    )
+    @app_commands.autocomplete(イベント=_event_autocomplete)
+    async def change_entry_tag(
+        self,
+        interaction: discord.Interaction,
+        仕訳ID: int,
+        イベント: str | None = None,
+    ):
+        entry = await db.get_journal_entry(仕訳ID)
+        if not entry:
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳ID:04d} が見つかりません。", ephemeral=True)
+            return
+        new_tag = イベント or None
+        if new_tag and not await db.event_exists(new_tag):
+            await interaction.response.send_message(f"イベント「{new_tag}」は登録されていません。", ephemeral=True)
+            return
+        await db.update_journal_entry_tag(仕訳ID, new_tag)
+        msg = f"✅ 仕訳 #{仕訳ID:04d} のイベントタグを「{new_tag}」に変更しました。" if new_tag else f"✅ 仕訳 #{仕訳ID:04d} のイベントタグを解除しました。"
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="ストレージ確認", description="ディスク使用量とDB情報を表示します")
     async def storage_status(self, interaction: discord.Interaction):
