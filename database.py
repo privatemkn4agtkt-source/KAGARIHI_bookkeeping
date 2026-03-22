@@ -207,6 +207,24 @@ async def get_accounts() -> list[dict]:
             return [dict(r) for r in rows]
 
 
+async def get_accounts_with_usage() -> list[dict]:
+    """仕訳帳の使用回数順で勘定科目を返す（オートコンプリート用）"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT a.name, a.account_type,
+                      COUNT(je.id) AS usage_count
+               FROM accounts a
+               LEFT JOIN journal_entries je
+                      ON je.debit_account = a.name
+                      OR je.credit_account = a.name
+               GROUP BY a.name, a.account_type
+               ORDER BY usage_count DESC, a.name"""
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def account_exists(name: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -790,39 +808,6 @@ async def get_yearly_summary(year: str) -> list[dict]:
             exp = sum(e["amount"] for e in entries if e["debit_type"] == "費用")
             result.append({"month": ym, "revenue": rev, "expense": exp, "net": rev - exp})
         return result
-
-
-async def get_period_comparison(period1: str, period2: str) -> dict:
-    """2期間の収支比較。period: 'YYYY-MM' または 'YYYY'"""
-    async def _summary(period: str) -> dict:
-        async with aiosqlite.connect(DB_PATH) as conn:
-            conn.row_factory = aiosqlite.Row
-            async with conn.execute(
-                """
-                SELECT je.*, a_d.account_type AS debit_type, a_c.account_type AS credit_type
-                FROM journal_entries je
-                LEFT JOIN accounts a_d ON je.debit_account = a_d.name
-                LEFT JOIN accounts a_c ON je.credit_account = a_c.name
-                WHERE je.entry_date LIKE ?
-                """,
-                (period + "%",),
-            ) as cursor:
-                entries = [dict(r) for r in await cursor.fetchall()]
-        revenues: dict[str, int] = {}
-        expenses: dict[str, int] = {}
-        for e in entries:
-            if e["credit_type"] == "収益":
-                revenues[e["credit_account"]] = revenues.get(e["credit_account"], 0) + e["amount"]
-            if e["debit_type"] == "費用":
-                expenses[e["debit_account"]] = expenses.get(e["debit_account"], 0) + e["amount"]
-        total_rev = sum(revenues.values())
-        total_exp = sum(expenses.values())
-        return {"period": period, "revenues": revenues, "expenses": expenses,
-                "total_revenue": total_rev, "total_expense": total_exp, "net": total_rev - total_exp}
-
-    s1 = await _summary(period1)
-    s2 = await _summary(period2)
-    return {"period1": s1, "period2": s2}
 
 
 async def set_budget(account_name: str, period: str, amount: int) -> None:

@@ -8,6 +8,7 @@ from datetime import date
 import database as db
 
 CRIT_PERCENT = 90   # 月初自動警告の閾値 (%)
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "")
 
 
 def fmt_amount(n: int) -> str:
@@ -195,7 +196,7 @@ class Bookkeeping(commands.Cog):
     async def _account_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        accounts = await db.get_accounts()
+        accounts = await db.get_accounts_with_usage()
         return [
             app_commands.Choice(name=a["name"], value=a["name"])
             for a in accounts if current.lower() in a["name"].lower()
@@ -925,64 +926,6 @@ class Bookkeeping(commands.Cog):
         embed.add_field(name="年間純利益" if net >= 0 else "年間純損失", value=f"**{sign}{fmt_amount(net)}**", inline=True)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="収支比較", description="2つの期間の収支を比較します")
-    @app_commands.describe(
-        期間1="比較する期間1 YYYY-MM または YYYY",
-        期間2="比較する期間2 YYYY-MM または YYYY",
-    )
-    async def period_comparison(self, interaction: discord.Interaction, 期間1: str, 期間2: str):
-        result = await db.get_period_comparison(期間1, 期間2)
-        s1 = result["period1"]
-        s2 = result["period2"]
-
-        all_rev_keys = sorted(set(list(s1["revenues"].keys()) + list(s2["revenues"].keys())))
-        all_exp_keys = sorted(set(list(s1["expenses"].keys()) + list(s2["expenses"].keys())))
-
-        def diff_str(v1: int, v2: int) -> str:
-            diff = v2 - v1
-            sign = "+" if diff >= 0 else ""
-            return f"({sign}{fmt_amount(diff)})"
-
-        rev_lines = []
-        for k in all_rev_keys:
-            v1, v2 = s1["revenues"].get(k, 0), s2["revenues"].get(k, 0)
-            rev_lines.append(f"　{k}: {fmt_amount(v1)} → {fmt_amount(v2)} {diff_str(v1, v2)}")
-        exp_lines = []
-        for k in all_exp_keys:
-            v1, v2 = s1["expenses"].get(k, 0), s2["expenses"].get(k, 0)
-            exp_lines.append(f"　{k}: {fmt_amount(v1)} → {fmt_amount(v2)} {diff_str(v1, v2)}")
-
-        embed = discord.Embed(
-            title=f"📊 収支比較: {期間1} vs {期間2}",
-            color=discord.Color.blue(),
-        )
-        embed.add_field(
-            name="【収益】",
-            value=_truncate("\n".join(rev_lines) or "　（なし）"),
-            inline=False,
-        )
-        embed.add_field(
-            name=f"収益合計: {fmt_amount(s1['total_revenue'])} → {fmt_amount(s2['total_revenue'])} {diff_str(s1['total_revenue'], s2['total_revenue'])}",
-            value="\u200b",
-            inline=False,
-        )
-        embed.add_field(
-            name="【費用】",
-            value=_truncate("\n".join(exp_lines) or "　（なし）"),
-            inline=False,
-        )
-        embed.add_field(
-            name=f"費用合計: {fmt_amount(s1['total_expense'])} → {fmt_amount(s2['total_expense'])} {diff_str(s1['total_expense'], s2['total_expense'])}",
-            value="\u200b",
-            inline=False,
-        )
-        embed.add_field(
-            name=f"純利益: {fmt_amount(s1['net'])} → {fmt_amount(s2['net'])} {diff_str(s1['net'], s2['net'])}",
-            value="\u200b",
-            inline=False,
-        )
-        await interaction.response.send_message(embed=embed)
-
     @app_commands.command(name="勘定科目一覧", description="登録されている勘定科目を一覧表示します")
     async def list_accounts(self, interaction: discord.Interaction):
         accounts = await db.get_accounts()
@@ -1648,6 +1591,27 @@ class Bookkeeping(commands.Cog):
             added = u["added_by"] or "不明"
             lines.append(f"`{u['discord_user_id']}` **{name}** — 追加者: {added}（{u['added_at'][:10]}）")
         embed.description = "\n".join(lines)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="ダッシュボード", description="会計ダッシュボードのURLを表示します（許可ユーザーのみ）")
+    async def show_dashboard(self, interaction: discord.Interaction):
+        if not await self._is_dashboard_allowed(str(interaction.user.id)):
+            await interaction.response.send_message(
+                "❌ 閲覧権限がありません。`/ダッシュボード許可追加` で権限を付与してもらってください。",
+                ephemeral=True,
+            )
+            return
+        if not DASHBOARD_URL:
+            await interaction.response.send_message(
+                "⚠️ ダッシュボードURLが設定されていません（環境変数 `DASHBOARD_URL`）。",
+                ephemeral=True,
+            )
+            return
+        embed = discord.Embed(
+            title="📊 会計ダッシュボード",
+            description=f"[ダッシュボードを開く]({DASHBOARD_URL})",
+            color=discord.Color.blurple(),
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # =========================================================================
