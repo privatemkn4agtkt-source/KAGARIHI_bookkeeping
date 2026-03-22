@@ -227,12 +227,17 @@ class Bookkeeping(commands.Cog):
     @app_commands.describe(
         借方="借方勘定科目（候補から選ぶか直接入力）",
         貸方="貸方勘定科目（候補から選ぶか直接入力）",
-        金額="金額（円、整数）",
+        金額="金額（円、整数・税込で入力）",
         摘要="取引の説明",
         日付="取引日 YYYY-MM-DD（省略時は今日）",
         イベント="紐づけるイベント名（/イベント作成 で事前登録が必要）",
+        消費税率="消費税率 0 or 10（%）。指定すると税額を自動計算して表示します",
     )
     @app_commands.autocomplete(借方=_account_autocomplete, 貸方=_account_autocomplete, イベント=_event_autocomplete)
+    @app_commands.choices(消費税率=[
+        app_commands.Choice(name="非課税 (0%)", value=0),
+        app_commands.Choice(name="課税 (10%)", value=10),
+    ])
     async def add_entry(
         self,
         interaction: discord.Interaction,
@@ -242,6 +247,7 @@ class Bookkeeping(commands.Cog):
         摘要: str,
         日付: str | None = None,
         イベント: str | None = None,
+        消費税率: int = 0,
     ):
         if 金額 <= 0:
             await interaction.response.send_message("金額は1以上の整数を指定してください。", ephemeral=True)
@@ -270,15 +276,19 @@ class Bookkeeping(commands.Cog):
             )
             return
 
-        entry_id = await db.add_journal_entry(entry_date, 借方, 貸方, 金額, 摘要, イベント)
+        entry_id = await db.add_journal_entry(entry_date, 借方, 貸方, 金額, 摘要, イベント, 消費税率)
 
         embed = discord.Embed(
             title=f"✅ 仕訳 #{entry_id:04d} を記録しました",
             color=discord.Color.green(),
         )
         embed.add_field(name="日付", value=entry_date, inline=True)
-        embed.add_field(name="金額", value=fmt_amount(金額), inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="金額（税込）", value=fmt_amount(金額), inline=True)
+        if 消費税率 > 0:
+            tax_amt = int(金額 * 消費税率 / (100 + 消費税率))
+            embed.add_field(name=f"消費税({消費税率}%)", value=fmt_amount(tax_amt), inline=True)
+        else:
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="借方", value=借方, inline=True)
         embed.add_field(name="貸方", value=貸方, inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
@@ -1197,6 +1207,378 @@ class Bookkeeping(commands.Cog):
         info = await db.get_storage_info()
         embed = _storage_embed(info)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+    # =========================================================================
+    # グッズ在庫管理
+    # =========================================================================
+
+    async def _goods_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        goods = await db.get_goods()
+        return [
+            app_commands.Choice(name=f"{g['name']} (在庫:{g['stock']})", value=g["name"])
+            for g in goods if current.lower() in g["name"].lower()
+        ][:25]
+
+    @app_commands.command(name="グッズ登録", description="新しいグッズを在庫管理に追加します")
+    @app_commands.describe(
+        グッズ名="グッズの名称（例: Tシャツ、クリアファイル）",
+        販売単価="販売価格（円）",
+    )
+    async def goods_register(self, interaction: discord.Interaction, グッズ名: str, 販売単価: int):
+        if 販売単価 <= 0:
+            await interaction.response.send_message("販売単価は1以上で入力してください。", ephemeral=True)
+            return
+        ok = await db.add_goods(グッズ名, 販売単価)
+        if not ok:
+            await interaction.response.send_message(f"❌ 「{グッズ名}」はすでに登録されています。", ephemeral=True)
+            return
+        embed = discord.Embed(title="📦 グッズを登録しました", color=discord.Color.green())
+        embed.add_field(name="グッズ名", value=グッズ名, inline=True)
+        embed.add_field(name="販売単価", value=fmt_amount(販売単価), inline=True)
+        embed.add_field(name="初期在庫", value="0 個", inline=True)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="グッズ仕入", description="グッズの仕入を記録し在庫を増やします（仕訳も自動生成）")
+    @app_commands.describe(
+        グッズ名="仕入れるグッズ名",
+        数量="仕入数量（個）",
+        仕入単価="1個あたりの仕入単価（円）",
+        日付="仕入日 YYYY-MM-DD（省略時は今日）",
+        摘要="備考",
+    )
+    @app_commands.autocomplete(グッズ名=_goods_autocomplete)
+    async def goods_purchase(
+        self,
+        interaction: discord.Interaction,
+        グッズ名: str,
+        数量: int,
+        仕入単価: int,
+        日付: str | None = None,
+        摘要: str = "",
+    ):
+        if 数量 <= 0 or 仕入単価 <= 0:
+            await interaction.response.send_message("数量・単価は1以上を指定してください。", ephemeral=True)
+            return
+        if not await db.goods_exists(グッズ名):
+            await interaction.response.send_message(f"❌ 「{グッズ名}」は未登録です。`/グッズ登録` で先に登録してください。", ephemeral=True)
+            return
+        entry_date = 日付 or str(date.today())
+        try:
+            date.fromisoformat(entry_date)
+        except ValueError:
+            await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
+            return
+
+        total = 数量 * 仕入単価
+        desc = 摘要 or f"{グッズ名} 仕入 {数量}個"
+        # 仕訳: グッズ在庫 / 現金
+        jid = await db.add_journal_entry(entry_date, "グッズ在庫", "現金", total, desc, None, 10)
+        tx_id = await db.record_goods_purchase(グッズ名, 数量, 仕入単価, entry_date, desc, jid)
+
+        embed = discord.Embed(title="📥 グッズ仕入を記録しました", color=discord.Color.blue())
+        embed.add_field(name="グッズ名", value=グッズ名, inline=True)
+        embed.add_field(name="数量", value=f"{数量} 個", inline=True)
+        embed.add_field(name="仕入単価", value=fmt_amount(仕入単価), inline=True)
+        embed.add_field(name="仕入総額", value=fmt_amount(total), inline=True)
+        embed.add_field(name="連携仕訳", value=f"#{jid:04d}", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="グッズ販売", description="グッズの販売を記録し在庫を減らします（仕訳も自動生成）")
+    @app_commands.describe(
+        グッズ名="販売するグッズ名",
+        数量="販売数量（個）",
+        販売単価="1個あたりの販売単価（省略時はグッズ登録時の単価）",
+        日付="販売日 YYYY-MM-DD（省略時は今日）",
+        イベント="紐づけるイベント名",
+        摘要="備考",
+    )
+    @app_commands.autocomplete(グッズ名=_goods_autocomplete, イベント=_event_autocomplete)
+    async def goods_sale(
+        self,
+        interaction: discord.Interaction,
+        グッズ名: str,
+        数量: int,
+        販売単価: int | None = None,
+        日付: str | None = None,
+        イベント: str | None = None,
+        摘要: str = "",
+    ):
+        if 数量 <= 0:
+            await interaction.response.send_message("数量は1以上を指定してください。", ephemeral=True)
+            return
+        goods_list = await db.get_goods()
+        goods_info = next((g for g in goods_list if g["name"] == グッズ名), None)
+        if goods_info is None:
+            await interaction.response.send_message(f"❌ 「{グッズ名}」は未登録です。", ephemeral=True)
+            return
+        unit_price = 販売単価 if 販売単価 is not None else goods_info["selling_price"]
+        if unit_price <= 0:
+            await interaction.response.send_message("販売単価は1以上を指定してください。", ephemeral=True)
+            return
+        entry_date = 日付 or str(date.today())
+        try:
+            date.fromisoformat(entry_date)
+        except ValueError:
+            await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
+            return
+        if イベント and not await db.event_exists(イベント):
+            await interaction.response.send_message(f"イベント「{イベント}」は登録されていません。", ephemeral=True)
+            return
+
+        total = 数量 * unit_price
+        desc = 摘要 or f"{グッズ名} 販売 {数量}個"
+        # 仕訳: 現金 / グッズ売上
+        jid = await db.add_journal_entry(entry_date, "現金", "グッズ売上", total, desc, イベント, 10)
+        tx_id, err = await db.record_goods_sale(グッズ名, 数量, unit_price, entry_date, desc, jid)
+        if err:
+            # 仕訳を取り消し
+            await db.delete_journal_entry(jid)
+            await interaction.response.send_message(f"❌ {err}", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="💰 グッズ販売を記録しました", color=discord.Color.green())
+        embed.add_field(name="グッズ名", value=グッズ名, inline=True)
+        embed.add_field(name="数量", value=f"{数量} 個", inline=True)
+        embed.add_field(name="販売単価", value=fmt_amount(unit_price), inline=True)
+        embed.add_field(name="売上合計", value=fmt_amount(total), inline=True)
+        embed.add_field(name="連携仕訳", value=f"#{jid:04d}", inline=True)
+        if イベント:
+            embed.add_field(name="イベント", value=イベント, inline=True)
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="グッズ在庫", description="グッズの現在庫と売上サマリーを表示します")
+    async def goods_inventory(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        summary = await db.get_goods_inventory_summary()
+        if not summary:
+            await interaction.followup.send("グッズが登録されていません。`/グッズ登録` で追加してください。", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📦 グッズ在庫サマリー", color=discord.Color.blue())
+        total_inv_value = 0
+        total_sales = 0
+        total_profit = 0
+        lines = []
+        for g in summary:
+            inv_val = g["inventory_value"]
+            total_inv_value += inv_val
+            total_sales += g["total_sales_amount"]
+            total_profit += g["gross_profit"]
+            lines.append(
+                f"**{g['name']}**　在庫:{g['stock']}個　"
+                f"仕入計:{fmt_amount(g['total_purchase_amount'])}　"
+                f"売上計:{fmt_amount(g['total_sales_amount'])}　"
+                f"粗利:{fmt_amount(g['gross_profit'])}"
+            )
+        embed.description = "\n".join(lines)
+        embed.add_field(name="在庫評価額合計", value=fmt_amount(total_inv_value), inline=True)
+        embed.add_field(name="グッズ売上合計", value=fmt_amount(total_sales), inline=True)
+        embed.add_field(name="グッズ粗利合計", value=fmt_amount(total_profit), inline=True)
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="グッズ履歴", description="グッズの仕入・販売履歴を表示します")
+    @app_commands.describe(
+        グッズ名="絞り込むグッズ名（省略時は全グッズ）",
+        件数="表示件数（最大50）",
+    )
+    @app_commands.autocomplete(グッズ名=_goods_autocomplete)
+    async def goods_history(
+        self,
+        interaction: discord.Interaction,
+        グッズ名: str | None = None,
+        件数: int = 15,
+    ):
+        await interaction.response.defer()
+        件数 = min(max(件数, 1), 50)
+        txs = await db.get_goods_transactions(グッズ名, 件数)
+        if not txs:
+            await interaction.followup.send("取引履歴がありません。", ephemeral=True)
+            return
+        lines = []
+        for t in txs:
+            icon = "📥" if t["tx_type"] == "仕入" else "💰"
+            lines.append(
+                f"{icon} `#{t['id']:04d}` {t['entry_date']} **{t['goods_name']}** "
+                f"{t['tx_type']} {t['quantity']}個 @{fmt_amount(t['unit_price'])} "
+                f"= {fmt_amount(t['total_amount'])}　{t['description']}"
+            )
+        title = f"📋 グッズ取引履歴{f'（{グッズ名}）' if グッズ名 else ''}"
+        embed = discord.Embed(title=title, color=discord.Color.blurple())
+        embed.description = _truncate("\n".join(lines))
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="グッズ削除", description="グッズを在庫管理から削除します（取引履歴がある場合は削除不可）")
+    @app_commands.describe(グッズ名="削除するグッズ名")
+    @app_commands.autocomplete(グッズ名=_goods_autocomplete)
+    async def goods_delete(self, interaction: discord.Interaction, グッズ名: str):
+        ok, msg = await db.delete_goods(グッズ名)
+        if ok:
+            await interaction.response.send_message(f"✅ 「{グッズ名}」を削除しました。")
+        else:
+            await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
+
+    # =========================================================================
+    # 消費税サマリー
+    # =========================================================================
+
+    @app_commands.command(name="消費税サマリー", description="消費税対応仕訳の集計を表示します")
+    @app_commands.describe(期間="集計期間 YYYY または YYYY-MM（省略時は全期間）")
+    async def tax_summary(self, interaction: discord.Interaction, 期間: str | None = None):
+        await interaction.response.defer()
+        result = await db.get_tax_summary(期間)
+        if not result["details"]:
+            await interaction.followup.send(
+                f"消費税が設定された仕訳がありません（期間: {result['period']}）。\n"
+                "`/仕訳` の `消費税率` パラメータで記録できます。",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"🧾 消費税サマリー（{result['period']}）",
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="課税売上（税抜）", value=fmt_amount(result["taxable_revenue"]), inline=True)
+        embed.add_field(name="仮受消費税", value=fmt_amount(result["collected_tax"]), inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="課税仕入（税抜）", value=fmt_amount(result["taxable_expense"]), inline=True)
+        embed.add_field(name="仮払消費税", value=fmt_amount(result["paid_tax"]), inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+        payable = result["tax_payable"]
+        payable_str = fmt_amount(abs(payable))
+        if payable > 0:
+            embed.add_field(name="納付消費税（概算）", value=f"▲ {payable_str}", inline=False)
+        elif payable < 0:
+            embed.add_field(name="還付消費税（概算）", value=f"＋ {payable_str}", inline=False)
+        else:
+            embed.add_field(name="納付消費税（概算）", value="0円", inline=False)
+
+        # 明細（最大15件）
+        detail_lines = []
+        for d in result["details"][:15]:
+            detail_lines.append(
+                f"`#{d['id']:04d}` {d['entry_date']} [{d['type']}] {d['description'][:20]} "
+                f"税込:{fmt_amount(d['amount_incl'])} 税額:{fmt_amount(d['tax_amount'])}"
+            )
+        if detail_lines:
+            embed.add_field(
+                name=f"明細（{len(result['details'])} 件中最大15件表示）",
+                value=_truncate("\n".join(detail_lines), 900),
+                inline=False,
+            )
+        embed.set_footer(text="※ 簡易計算です。正確な申告は税理士にご相談ください。")
+        await interaction.followup.send(embed=embed)
+
+    # =========================================================================
+    # 確定申告サマリー
+    # =========================================================================
+
+    @app_commands.command(name="確定申告サマリー", description="年間収支と推定所得税を確定申告ベースで表示します")
+    @app_commands.describe(年="対象年（YYYY形式、省略時は今年）")
+    async def tax_return_summary(self, interaction: discord.Interaction, 年: str | None = None):
+        await interaction.response.defer()
+        from datetime import date as _date
+        target_year = 年 or str(_date.today().year)
+        try:
+            int(target_year)
+            if len(target_year) != 4:
+                raise ValueError
+        except ValueError:
+            await interaction.followup.send("年は YYYY 形式（例: 2025）で入力してください。", ephemeral=True)
+            return
+
+        result = await db.get_tax_return_summary(target_year)
+
+        if result["total_revenue"] == 0 and result["total_expense"] == 0:
+            await interaction.followup.send(f"{target_year} 年の仕訳データがありません。", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"📋 確定申告サマリー（{target_year}年）",
+            color=discord.Color.gold(),
+            description="※ 青色申告65万円控除・基礎控除48万円を適用した概算です。",
+        )
+
+        # 収入
+        rev_lines = [f"　{k}: {fmt_amount(v)}" for k, v in sorted(result["revenues"].items(), key=lambda x: -x[1])]
+        embed.add_field(
+            name=f"収入合計: {fmt_amount(result['total_revenue'])}",
+            value="\n".join(rev_lines) or "（なし）",
+            inline=False,
+        )
+
+        # 経費
+        exp_lines = [f"　{k}: {fmt_amount(v)}" for k, v in sorted(result["expenses"].items(), key=lambda x: -x[1])]
+        embed.add_field(
+            name=f"経費合計: {fmt_amount(result['total_expense'])}",
+            value=_truncate("\n".join(exp_lines) or "（なし）", 500),
+            inline=False,
+        )
+
+        # 所得計算
+        calc_lines = [
+            f"事業所得: {fmt_amount(result['gross_income'])}",
+            f"青色申告特別控除: ▲{fmt_amount(result['blue_return_deduction'])}",
+            f"差引所得金額: {fmt_amount(result['taxable_income'])}",
+            f"基礎控除: ▲{fmt_amount(result['basic_deduction'])}",
+            f"課税所得: {fmt_amount(result['taxable_after_deductions'])}",
+        ]
+        embed.add_field(name="所得計算", value="\n".join(calc_lines), inline=False)
+
+        # 税額
+        tax_lines = [
+            f"所得税: {fmt_amount(result['income_tax'])}",
+            f"復興特別所得税 (2.1%): {fmt_amount(result['surtax'])}",
+            f"**合計納税額（概算）: {fmt_amount(result['total_tax'])}**",
+        ]
+        embed.add_field(name="税額", value="\n".join(tax_lines), inline=False)
+        embed.set_footer(text="※ 社会保険料控除等は含まれていません。正確な申告は税理士にご確認ください。")
+        await interaction.followup.send(embed=embed)
+
+    # =========================================================================
+    # デモデータ投入
+    # =========================================================================
+
+    @app_commands.command(name="デモデータ投入", description="各機能を試せるサンプルデータを一括投入します（開発・デモ用）")
+    async def seed_demo(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        summary = await db.seed_demo_data()
+
+        embed = discord.Embed(
+            title="🎸 デモデータを投入しました",
+            color=discord.Color.green(),
+            description="以下のサンプルデータが追加されました。各コマンドで動作を確認できます。",
+        )
+        embed.add_field(
+            name="イベント",
+            value="\n".join(f"・{e}" for e in summary["events"]) or "（追加なし・重複）",
+            inline=False,
+        )
+        embed.add_field(
+            name="メンバー",
+            value="\n".join(f"・{m}" for m in summary["members"]) or "（追加なし・重複）",
+            inline=False,
+        )
+        embed.add_field(
+            name="グッズ",
+            value="\n".join(f"・{g}" for g in summary["goods"]) or "（追加なし・重複）",
+            inline=False,
+        )
+        embed.add_field(name="仕訳件数", value=f"{summary['journal_entries']} 件", inline=True)
+        embed.add_field(
+            name="確認コマンド",
+            value=(
+                "`/仕訳帳` `/ライブ収支` `/グッズ在庫` `/グッズ履歴`\n"
+                "`/消費税サマリー` `/確定申告サマリー` `/損益計算書`"
+            ),
+            inline=False,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

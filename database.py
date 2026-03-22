@@ -15,16 +15,37 @@ ACCOUNT_TYPES = {
 }
 
 DEFAULT_ACCOUNTS = [
+    # 資産
     ("現金", "資産"),
     ("普通預金", "資産"),
     ("売掛金", "資産"),
+    ("グッズ在庫", "資産"),
+    ("仮払消費税", "資産"),
+    # 収益
     ("売上", "収益"),
+    ("グッズ売上", "収益"),
+    ("Booth売上", "収益"),
+    ("Fanbox売上", "収益"),
+    ("ストリーミング収益", "収益"),
+    ("出演料", "収益"),
+    # 費用
     ("旅費交通費", "費用"),
     ("消耗品費", "費用"),
     ("スタジオレンタル代", "費用"),
     ("会場レンタル代", "費用"),
+    ("グッズ仕入", "費用"),
+    ("機材費", "費用"),
+    ("音源制作費", "費用"),
+    ("MV制作費", "費用"),
+    ("宣伝広告費", "費用"),
+    ("通信費", "費用"),
+    ("配信サービス費", "費用"),
+    # 負債
     ("買掛金", "負債"),
     ("未払金", "負債"),
+    ("仮受消費税", "負債"),
+    ("源泉徴収預り金", "負債"),
+    # 資本
     ("繰越利益剰余金", "資本"),
 ]
 
@@ -88,6 +109,29 @@ async def init_db():
                 UNIQUE(account_name, period)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS goods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                selling_price INTEGER NOT NULL,
+                stock INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS goods_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                goods_name TEXT NOT NULL,
+                tx_type TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                unit_price INTEGER NOT NULL,
+                total_amount INTEGER NOT NULL,
+                entry_date TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                journal_entry_id INTEGER,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
         # デフォルト勘定科目を投入
         for name, acc_type in DEFAULT_ACCOUNTS:
             await db.execute(
@@ -97,6 +141,11 @@ async def init_db():
         # マイグレーション: event_tag 列の追加（既存DBへの対応）
         try:
             await db.execute("ALTER TABLE journal_entries ADD COLUMN event_tag TEXT DEFAULT NULL")
+        except Exception:
+            pass
+        # マイグレーション: tax_rate 列の追加
+        try:
+            await db.execute("ALTER TABLE journal_entries ADD COLUMN tax_rate INTEGER DEFAULT 0")
         except Exception:
             pass
         await db.commit()
@@ -150,13 +199,14 @@ async def add_journal_entry(
     amount: int,
     description: str,
     event_tag: str | None = None,
+    tax_rate: int = 0,
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """INSERT INTO journal_entries
-               (entry_date, debit_account, credit_account, amount, description, event_tag)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (entry_date, debit_account, credit_account, amount, description, event_tag),
+               (entry_date, debit_account, credit_account, amount, description, event_tag, tax_rate)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (entry_date, debit_account, credit_account, amount, description, event_tag, tax_rate),
         )
         await db.commit()
         return cursor.lastrowid
@@ -166,7 +216,8 @@ async def get_journal_entries(limit: int = 20) -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag
+            """SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag,
+                      COALESCE(tax_rate, 0) AS tax_rate
                FROM journal_entries ORDER BY entry_date DESC, id DESC LIMIT ?""",
             (limit,),
         ) as cursor:
@@ -188,7 +239,9 @@ async def get_journal_entry(entry_id: int) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag FROM journal_entries WHERE id = ?",
+            """SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag,
+                      COALESCE(tax_rate, 0) AS tax_rate
+               FROM journal_entries WHERE id = ?""",
             (entry_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -203,14 +256,15 @@ async def update_journal_entry(
     amount: int,
     description: str,
     event_tag: str | None,
+    tax_rate: int = 0,
 ) -> bool:
     """仕訳を上書き編集する"""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """UPDATE journal_entries
-               SET entry_date=?, debit_account=?, credit_account=?, amount=?, description=?, event_tag=?
+               SET entry_date=?, debit_account=?, credit_account=?, amount=?, description=?, event_tag=?, tax_rate=?
                WHERE id=?""",
-            (entry_date, debit_account, credit_account, amount, description, event_tag, entry_id),
+            (entry_date, debit_account, credit_account, amount, description, event_tag, tax_rate, entry_id),
         )
         await db.commit()
         return cursor.rowcount > 0
@@ -251,7 +305,8 @@ async def get_journal_entries_filtered(
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            f"""SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag
+            f"""SELECT id, entry_date, debit_account, credit_account, amount, description, event_tag,
+                       COALESCE(tax_rate, 0) AS tax_rate
                FROM journal_entries {where}
                ORDER BY entry_date DESC, id DESC LIMIT ?""",
             params,
@@ -750,6 +805,411 @@ async def set_budget(account_name: str, period: str, amount: int) -> None:
             (account_name, period, amount),
         )
         await conn.commit()
+
+
+# =============================================================================
+# グッズ在庫管理
+# =============================================================================
+
+async def add_goods(name: str, selling_price: int) -> bool:
+    """グッズを登録する"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        try:
+            await conn.execute(
+                "INSERT INTO goods (name, selling_price) VALUES (?, ?)",
+                (name, selling_price),
+            )
+            await conn.commit()
+            return True
+        except aiosqlite.IntegrityError:
+            return False
+
+
+async def get_goods() -> list[dict]:
+    """全グッズ一覧（在庫数・販売単価付き）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT id, name, selling_price, stock FROM goods ORDER BY name"
+        ) as cursor:
+            return [dict(r) for r in await cursor.fetchall()]
+
+
+async def goods_exists(name: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute("SELECT 1 FROM goods WHERE name = ?", (name,)) as cursor:
+            return await cursor.fetchone() is not None
+
+
+async def delete_goods(name: str) -> tuple[bool, str]:
+    """グッズを削除する（取引履歴がある場合は拒否）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            "SELECT COUNT(*) FROM goods_transactions WHERE goods_name = ?", (name,)
+        ) as cursor:
+            count = (await cursor.fetchone())[0]
+        if count > 0:
+            return False, f"取引履歴が {count} 件あるため削除できません"
+        cursor = await conn.execute("DELETE FROM goods WHERE name = ?", (name,))
+        await conn.commit()
+        if cursor.rowcount == 0:
+            return False, "グッズが見つかりません"
+        return True, ""
+
+
+async def record_goods_purchase(
+    goods_name: str,
+    quantity: int,
+    unit_price: int,
+    entry_date: str,
+    description: str,
+    journal_entry_id: int | None = None,
+) -> int:
+    """グッズ仕入を記録し在庫を増やす"""
+    total = quantity * unit_price
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute(
+            """INSERT INTO goods_transactions
+               (goods_name, tx_type, quantity, unit_price, total_amount, entry_date, description, journal_entry_id)
+               VALUES (?, '仕入', ?, ?, ?, ?, ?, ?)""",
+            (goods_name, quantity, unit_price, total, entry_date, description, journal_entry_id),
+        )
+        await conn.execute(
+            "UPDATE goods SET stock = stock + ? WHERE name = ?", (quantity, goods_name)
+        )
+        await conn.commit()
+        return cursor.lastrowid
+
+
+async def record_goods_sale(
+    goods_name: str,
+    quantity: int,
+    unit_price: int,
+    entry_date: str,
+    description: str,
+    journal_entry_id: int | None = None,
+) -> tuple[int, str]:
+    """グッズ販売を記録し在庫を減らす。在庫不足なら (0, error_msg) を返す"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT stock FROM goods WHERE name = ?", (goods_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return 0, "グッズが見つかりません"
+        if row["stock"] < quantity:
+            return 0, f"在庫不足（現在庫: {row['stock']} 個）"
+
+        total = quantity * unit_price
+        cursor = await conn.execute(
+            """INSERT INTO goods_transactions
+               (goods_name, tx_type, quantity, unit_price, total_amount, entry_date, description, journal_entry_id)
+               VALUES (?, '販売', ?, ?, ?, ?, ?, ?)""",
+            (goods_name, quantity, unit_price, total, entry_date, description, journal_entry_id),
+        )
+        await conn.execute(
+            "UPDATE goods SET stock = stock - ? WHERE name = ?", (quantity, goods_name)
+        )
+        await conn.commit()
+        return cursor.lastrowid, ""
+
+
+async def get_goods_transactions(goods_name: str | None = None, limit: int = 30) -> list[dict]:
+    """グッズ取引履歴"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        if goods_name:
+            async with conn.execute(
+                """SELECT * FROM goods_transactions WHERE goods_name = ?
+                   ORDER BY entry_date DESC, id DESC LIMIT ?""",
+                (goods_name, limit),
+            ) as cursor:
+                return [dict(r) for r in await cursor.fetchall()]
+        else:
+            async with conn.execute(
+                "SELECT * FROM goods_transactions ORDER BY entry_date DESC, id DESC LIMIT ?",
+                (limit,),
+            ) as cursor:
+                return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_goods_inventory_summary() -> list[dict]:
+    """全グッズの在庫状況サマリー（仕入総額・売上総額・在庫評価額）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("SELECT name, selling_price, stock FROM goods ORDER BY name") as cursor:
+            goods_list = [dict(r) for r in await cursor.fetchall()]
+
+        result = []
+        for g in goods_list:
+            async with conn.execute(
+                """SELECT
+                     COALESCE(SUM(CASE WHEN tx_type='仕入' THEN total_amount ELSE 0 END), 0) AS total_purchase,
+                     COALESCE(SUM(CASE WHEN tx_type='販売' THEN total_amount ELSE 0 END), 0) AS total_sales,
+                     COALESCE(SUM(CASE WHEN tx_type='仕入' THEN quantity ELSE 0 END), 0) AS total_purchased,
+                     COALESCE(SUM(CASE WHEN tx_type='販売' THEN quantity ELSE 0 END), 0) AS total_sold
+                   FROM goods_transactions WHERE goods_name = ?""",
+                (g["name"],),
+            ) as cursor:
+                stats = dict(await cursor.fetchone())
+            avg_cost = (stats["total_purchase"] // stats["total_purchased"]) if stats["total_purchased"] > 0 else 0
+            result.append({
+                "name": g["name"],
+                "selling_price": g["selling_price"],
+                "stock": g["stock"],
+                "total_purchased": stats["total_purchased"],
+                "total_sold": stats["total_sold"],
+                "total_purchase_amount": stats["total_purchase"],
+                "total_sales_amount": stats["total_sales"],
+                "inventory_value": avg_cost * g["stock"],
+                "gross_profit": stats["total_sales"] - stats["total_purchase"],
+            })
+        return result
+
+
+# =============================================================================
+# 消費税サマリー
+# =============================================================================
+
+async def get_tax_summary(period: str | None = None) -> dict:
+    """
+    消費税対応仕訳の集計。
+    period: 'YYYY' または 'YYYY-MM'（None で全期間）
+    返す値はすべて税込金額ベース。tax_amount = amount * rate / (100 + rate)
+    """
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        where = "WHERE COALESCE(tax_rate, 0) > 0"
+        params: list = []
+        if period:
+            where += " AND entry_date LIKE ?"
+            params.append(period + "%")
+        async with conn.execute(
+            f"""SELECT je.*, a_d.account_type AS debit_type, a_c.account_type AS credit_type
+                FROM journal_entries je
+                LEFT JOIN accounts a_d ON je.debit_account = a_d.name
+                LEFT JOIN accounts a_c ON je.credit_account = a_c.name
+                {where} ORDER BY je.entry_date, je.id""",
+            params,
+        ) as cursor:
+            entries = [dict(r) for r in await cursor.fetchall()]
+
+    taxable_revenue = 0
+    taxable_expense = 0
+    collected_tax = 0   # 仮受消費税（売上に係る）
+    paid_tax = 0        # 仮払消費税（仕入・経費に係る）
+    details: list[dict] = []
+
+    for e in entries:
+        rate = e.get("tax_rate") or 0
+        if rate == 0:
+            continue
+        tax_amt = int(e["amount"] * rate / (100 + rate))
+        excl_amt = e["amount"] - tax_amt
+        is_revenue = e["credit_type"] == "収益"
+        is_expense = e["debit_type"] == "費用"
+        if is_revenue:
+            taxable_revenue += excl_amt
+            collected_tax += tax_amt
+        if is_expense:
+            taxable_expense += excl_amt
+            paid_tax += tax_amt
+        details.append({
+            "id": e["id"],
+            "entry_date": e["entry_date"],
+            "description": e["description"],
+            "amount_incl": e["amount"],
+            "tax_rate": rate,
+            "tax_amount": tax_amt,
+            "amount_excl": excl_amt,
+            "type": "収益" if is_revenue else ("費用" if is_expense else "その他"),
+        })
+
+    return {
+        "period": period or "全期間",
+        "taxable_revenue": taxable_revenue,
+        "taxable_expense": taxable_expense,
+        "collected_tax": collected_tax,
+        "paid_tax": paid_tax,
+        "tax_payable": collected_tax - paid_tax,
+        "details": details,
+    }
+
+
+# =============================================================================
+# 確定申告サマリー
+# =============================================================================
+
+async def get_tax_return_summary(year: str) -> dict:
+    """
+    確定申告用年間サマリー。
+    収入・経費を科目別に集計し、所得・推定納税額を返す。
+    """
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            """SELECT je.*, a_d.account_type AS debit_type, a_c.account_type AS credit_type
+               FROM journal_entries je
+               LEFT JOIN accounts a_d ON je.debit_account = a_d.name
+               LEFT JOIN accounts a_c ON je.credit_account = a_c.name
+               WHERE je.entry_date LIKE ?""",
+            (year + "%",),
+        ) as cursor:
+            entries = [dict(r) for r in await cursor.fetchall()]
+
+    revenues: dict[str, int] = {}
+    expenses: dict[str, int] = {}
+    for e in entries:
+        if e["credit_type"] == "収益":
+            revenues[e["credit_account"]] = revenues.get(e["credit_account"], 0) + e["amount"]
+        if e["debit_type"] == "費用":
+            expenses[e["debit_account"]] = expenses.get(e["debit_account"], 0) + e["amount"]
+
+    total_revenue = sum(revenues.values())
+    total_expense = sum(expenses.values())
+    gross_income = total_revenue - total_expense
+    # 青色申告特別控除（簡易的に65万円を適用）
+    blue_return_deduction = min(650000, max(0, gross_income))
+    taxable_income = max(0, gross_income - blue_return_deduction)
+    # 基礎控除 48万円
+    basic_deduction = 480000
+    taxable_after_deductions = max(0, taxable_income - basic_deduction)
+    # 簡易累進税率（所得税）
+    def calc_income_tax(income: int) -> int:
+        brackets = [
+            (1950000, 0.05, 0),
+            (3300000, 0.10, 97500),
+            (6950000, 0.20, 427500),
+            (9000000, 0.23, 636000),
+            (18000000, 0.33, 1536000),
+            (40000000, 0.40, 2796000),
+            (float("inf"), 0.45, 4796000),
+        ]
+        for limit, rate, deduction in brackets:
+            if income <= limit:
+                return int(income * rate - deduction)
+        return 0
+    income_tax = calc_income_tax(taxable_after_deductions)
+    # 復興特別所得税 2.1%
+    surtax = int(income_tax * 0.021)
+
+    return {
+        "year": year,
+        "revenues": revenues,
+        "expenses": expenses,
+        "total_revenue": total_revenue,
+        "total_expense": total_expense,
+        "gross_income": gross_income,
+        "blue_return_deduction": blue_return_deduction,
+        "taxable_income": taxable_income,
+        "basic_deduction": basic_deduction,
+        "taxable_after_deductions": taxable_after_deductions,
+        "income_tax": income_tax,
+        "surtax": surtax,
+        "total_tax": income_tax + surtax,
+    }
+
+
+# =============================================================================
+# デモデータ投入
+# =============================================================================
+
+async def seed_demo_data() -> dict:
+    """デモ用サンプルデータを投入する。重複は無視。"""
+    from datetime import date as _date
+
+    summary = {"events": [], "members": [], "goods": [], "journal_entries": 0}
+
+    # イベント
+    for ev in ["2025春ライブ@渋谷", "2025夏フェス出演", "2025冬ワンマン@新宿"]:
+        ok = await create_event(ev)
+        if ok:
+            summary["events"].append(ev)
+
+    # メンバー
+    for m in ["田中（Vo）", "佐藤（Gt）", "鈴木（Ba）", "高橋（Dr）"]:
+        ok = await add_member(m)
+        if ok:
+            summary["members"].append(m)
+
+    # グッズ
+    for name, price in [("Tシャツ", 3300), ("クリアファイル", 550), ("ステッカー", 330), ("CD", 1100)]:
+        ok = await add_goods(name, price)
+        if ok:
+            summary["goods"].append(name)
+
+    # 仕訳データ（消費税込みのものも含む）
+    demo_entries = [
+        # ライブ収益
+        ("2025-04-15", "現金", "売上", 85000, "2025春ライブ チケット売上", "2025春ライブ@渋谷", 0),
+        ("2025-04-15", "現金", "グッズ売上", 42000, "2025春ライブ グッズ販売", "2025春ライブ@渋谷", 10),
+        ("2025-04-10", "現金", "会場レンタル代", 30000, "2025春ライブ 会場費", "2025春ライブ@渋谷", 10),
+        ("2025-04-10", "現金", "宣伝広告費", 8000, "フライヤー印刷代", "2025春ライブ@渋谷", 10),
+        # デジタル収益
+        ("2025-05-01", "普通預金", "Booth売上", 28600, "Booth 4月分売上入金", None, 10),
+        ("2025-05-01", "普通預金", "Fanbox売上", 15400, "Fanbox 4月分支援入金", None, 10),
+        ("2025-05-20", "普通預金", "ストリーミング収益", 3200, "Spotify/Apple 4月分", None, 0),
+        # スタジオ
+        ("2025-05-10", "現金", "スタジオレンタル代", 12000, "月例練習 スタジオ代", None, 10),
+        ("2025-06-10", "現金", "スタジオレンタル代", 12000, "月例練習 スタジオ代", None, 10),
+        # 機材
+        ("2025-06-01", "現金", "機材費", 55000, "ギターエフェクター購入", None, 10),
+        # 夏フェス
+        ("2025-07-20", "普通預金", "出演料", 100000, "夏フェス 出演料", "2025夏フェス出演", 10),
+        ("2025-07-15", "現金", "旅費交通費", 22000, "夏フェス 交通費（4名分）", "2025夏フェス出演", 0),
+        # 音源制作
+        ("2025-08-01", "普通預金", "音源制作費", 150000, "1stミニアルバム レコーディング費", None, 10),
+        ("2025-09-01", "普通預金", "MV制作費", 200000, "MV制作依頼", None, 10),
+        # 冬ワンマン
+        ("2025-12-20", "現金", "売上", 120000, "2025冬ワンマン チケット売上", "2025冬ワンマン@新宿", 0),
+        ("2025-12-20", "現金", "グッズ売上", 63000, "2025冬ワンマン グッズ販売", "2025冬ワンマン@新宿", 10),
+        ("2025-12-18", "現金", "会場レンタル代", 50000, "2025冬ワンマン 会場費", "2025冬ワンマン@新宿", 10),
+        ("2025-12-10", "現金", "宣伝広告費", 15000, "SNS広告費", "2025冬ワンマン@新宿", 10),
+        # グッズ仕入
+        ("2025-03-01", "グッズ在庫", "現金", 40000, "Tシャツ 20枚 仕入", None, 10),
+        ("2025-03-01", "グッズ在庫", "現金", 5500, "ステッカー 50枚 仕入", None, 10),
+    ]
+
+    count = 0
+    async with aiosqlite.connect(DB_PATH) as conn:
+        for entry_date, debit, credit, amount, desc, event_tag, tax_rate in demo_entries:
+            await conn.execute(
+                """INSERT INTO journal_entries
+                   (entry_date, debit_account, credit_account, amount, description, event_tag, tax_rate)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (entry_date, debit, credit, amount, desc, event_tag, tax_rate),
+            )
+            count += 1
+        await conn.commit()
+    summary["journal_entries"] = count
+
+    # グッズ取引履歴
+    async with aiosqlite.connect(DB_PATH) as conn:
+        goods_txs = [
+            ("Tシャツ", "仕入", 20, 2000, 40000, "2025-03-01", "初回仕入"),
+            ("ステッカー", "仕入", 50, 110, 5500, "2025-03-01", "初回仕入"),
+            ("Tシャツ", "販売", 8, 3300, 26400, "2025-04-15", "春ライブ販売"),
+            ("ステッカー", "販売", 20, 330, 6600, "2025-04-15", "春ライブ販売"),
+            ("Tシャツ", "販売", 5, 3300, 16500, "2025-12-20", "冬ワンマン販売"),
+            ("ステッカー", "販売", 15, 330, 4950, "2025-12-20", "冬ワンマン販売"),
+        ]
+        for gname, tx_type, qty, unit, total, edate, desc in goods_txs:
+            exists = await goods_exists(gname)
+            if not exists:
+                continue
+            await conn.execute(
+                """INSERT INTO goods_transactions
+                   (goods_name, tx_type, quantity, unit_price, total_amount, entry_date, description)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (gname, tx_type, qty, unit, total, edate, desc),
+            )
+        # 在庫数を更新
+        await conn.execute("UPDATE goods SET stock = 7 WHERE name = 'Tシャツ'")
+        await conn.execute("UPDATE goods SET stock = 15 WHERE name = 'ステッカー'")
+        await conn.commit()
+
+    return summary
 
 
 async def get_budget_vs_actual(period: str) -> list[dict]:
