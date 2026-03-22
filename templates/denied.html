@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>アクセス拒否 – KAGARIHI 会計</title>
+  <style>
+    :root { --bg:#0f1117; --surface:#1a1d27; --border:#2e3147; --red:#e05c5c; --muted:#8b8fa8; --text:#e8eaf0; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:"Hiragino Sans","Noto Sans JP",sans-serif; background:var(--bg); color:var(--text);
+           display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:16px;
+            padding:48px 40px; text-align:center; max-width:420px; }
+    h1 { font-size:22px; font-weight:700; margin-bottom:12px; color:var(--red); }
+    p  { color:var(--muted); font-size:14px; line-height:1.8; margin-bottom:8px; }
+    .id-box { background:#1e1e2e; border:1px solid var(--border); border-radius:8px;
+               padding:10px 16px; font-family:monospace; font-size:14px; margin:16px 0; color:var(--text); }
+    a { color:#7c6af7; text-decoration:none; }
+    a:hover { text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="font-size:48px;margin-bottom:16px;">🚫</div>
+    <h1>アクセスが拒否されました</h1>
+    <p>このダッシュボードを閲覧する権限がありません。</p>
+    {% if user %}
+    <p style="margin-top:8px;">ログイン中: <strong>{{ user.global_name }}</strong></p>
+    <p style="font-size:12px;color:var(--muted);">あなたの Discord ID</p>
+    <div class="id-box">{{ user.id }}</div>
+    <p style="font-size:13px;">この ID をバンドの管理者に伝えて、<br><code>ALLOWED_DISCORD_IDS</code> への追加を依頼してください。</p>
+    {% endif %}
+    <p style="margin-top:24px;"><a href="/auth/logout">別のアカウントでログイン</a></p>
+  </div>
+</body>
+</html>

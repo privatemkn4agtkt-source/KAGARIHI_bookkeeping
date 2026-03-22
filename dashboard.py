@@ -1,22 +1,63 @@
 """
-簡易ダッシュボード: bookkeeping.db の内容をブラウザで閲覧できます。
-使い方: python dashboard.py  →  http://localhost:8000 を開く
+KAGARIHI 会計ダッシュボード — Discord OAuth2 認証付き
+
+環境変数 (.env):
+  DISCORD_CLIENT_ID      : Discord Application の Client ID
+  DISCORD_CLIENT_SECRET  : Discord Application の Client Secret
+  DISCORD_REDIRECT_URI   : コールバックURL (例: https://example.com/auth/callback)
+  ALLOWED_DISCORD_IDS    : 閲覧を許可する Discord User ID (カンマ区切り)
+  SESSION_SECRET         : セッション署名用シークレット (長いランダム文字列)
+  DB_PATH                : DB ファイルパス (省略時: bookkeeping.db)
+  DASHBOARD_PORT         : ポート番号 (省略時: 8000)
+
+起動:
+  python dashboard.py
+
+Discord Application の設定:
+  1. https://discord.com/developers/applications でアプリを選択
+  2. OAuth2 → Redirects に DISCORD_REDIRECT_URI を追加
 """
 import os
-import asyncio
+import secrets
+import httpx
 from datetime import date
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, Query, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 import database as db
 
-# DB_PATH を環境変数または既定パスから取得
-DB_PATH = os.getenv("DB_PATH", "bookkeeping.db")
+load_dotenv()
+
+# ─────────────────────────────────────────────────────────
+# 設定
+# ─────────────────────────────────────────────────────────
+DB_PATH             = os.getenv("DB_PATH", "bookkeeping.db")
+CLIENT_ID           = os.getenv("DISCORD_CLIENT_ID", "")
+CLIENT_SECRET       = os.getenv("DISCORD_CLIENT_SECRET", "")
+REDIRECT_URI        = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:8000/auth/callback")
+SESSION_SECRET      = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
+DASHBOARD_PORT      = int(os.getenv("DASHBOARD_PORT", "8000"))
+
+# 許可ユーザーIDのセット (空なら全員拒否)
+_raw_ids = os.getenv("ALLOWED_DISCORD_IDS", "")
+ALLOWED_IDS: set[str] = {uid.strip() for uid in _raw_ids.split(",") if uid.strip()}
+
+DISCORD_API    = "https://discord.com/api/v10"
+DISCORD_OAUTH2 = "https://discord.com/oauth2/authorize"
+DISCORD_TOKEN  = "https://discord.com/api/oauth2/token"
+
 db.DB_PATH = DB_PATH
 
+
+# ─────────────────────────────────────────────────────────
+# アプリ初期化
+# ─────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,6 +66,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="KAGARIHI 会計ダッシュボード", lifespan=lifespan)
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=60 * 60 * 24 * 7)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -35,12 +77,152 @@ def fmt(n: int) -> str:
 
 
 # ─────────────────────────────────────────────────────────
-# ルーティング
+# 認証ヘルパー
+# ─────────────────────────────────────────────────────────
+
+def get_current_user(request: Request) -> dict | None:
+    """セッションからログインユーザーを返す。未ログインなら None。"""
+    return request.session.get("user")
+
+
+def require_auth(request: Request) -> dict:
+    """
+    ログイン済み かつ 許可IDリストに含まれる場合のみ通過。
+    それ以外はログインページへリダイレクト (例外で返す)。
+    """
+    user = get_current_user(request)
+    if user is None:
+        # ログイン後に元のページへ戻れるよう next パラメータを保持
+        request.session["next"] = str(request.url)
+        raise _redirect("/auth/login")
+    if ALLOWED_IDS and user["id"] not in ALLOWED_IDS:
+        raise _redirect("/auth/denied")
+    return user
+
+
+class _redirect(Exception):
+    """FastAPI の依存関係内でリダイレクトを発生させるための例外"""
+    def __init__(self, url: str):
+        self.url = url
+
+
+from fastapi import HTTPException
+from starlette.responses import Response
+
+
+async def auth_guard(request: Request) -> dict:
+    """全保護ページに付ける依存関係"""
+    try:
+        return require_auth(request)
+    except _redirect as e:
+        # 依存関係からリダイレクトを返す唯一の方法: 例外を HTTPException に変換
+        # ただし FastAPI では依存関係から Response を返せないため、
+        # ここでは request.state にフラグを立て、ルートハンドラ側でチェックする。
+        # → より簡潔な方法: middleware で処理する
+        raise HTTPException(status_code=307, headers={"Location": e.url})
+
+
+# ─────────────────────────────────────────────────────────
+# 認証ルート
+# ─────────────────────────────────────────────────────────
+
+@app.get("/auth/login", response_class=HTMLResponse)
+async def login(request: Request):
+    """Discord の OAuth2 認証画面へリダイレクト"""
+    if not CLIENT_ID or not CLIENT_SECRET:
+        return HTMLResponse(
+            "<h2>⚠️ DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET が未設定です。</h2>"
+            "<p>.env ファイルを確認してください。</p>",
+            status_code=500,
+        )
+    # CSRF 対策: state トークンをセッションに保存
+    state = secrets.token_urlsafe(16)
+    request.session["oauth_state"] = state
+
+    params = urlencode({
+        "client_id":     CLIENT_ID,
+        "redirect_uri":  REDIRECT_URI,
+        "response_type": "code",
+        "scope":         "identify",
+        "state":         state,
+    })
+    return RedirectResponse(f"{DISCORD_OAUTH2}?{params}", status_code=302)
+
+
+@app.get("/auth/callback")
+async def oauth_callback(request: Request, code: str = Query(None), state: str = Query(None), error: str = Query(None)):
+    """Discord からのコールバック処理"""
+    if error:
+        return RedirectResponse("/auth/login?error=cancelled", status_code=302)
+
+    # state 検証
+    saved_state = request.session.pop("oauth_state", None)
+    if not state or state != saved_state:
+        return HTMLResponse("<h2>❌ 不正なリクエストです（state 不一致）</h2>", status_code=400)
+
+    # アクセストークンを取得
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            DISCORD_TOKEN,
+            data={
+                "client_id":     CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "grant_type":    "authorization_code",
+                "code":          code,
+                "redirect_uri":  REDIRECT_URI,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    if token_resp.status_code != 200:
+        return HTMLResponse(f"<h2>❌ トークン取得失敗: {token_resp.text}</h2>", status_code=500)
+
+    token_data = token_resp.json()
+    access_token = token_data["access_token"]
+
+    # ユーザー情報を取得
+    async with httpx.AsyncClient() as client:
+        user_resp = await client.get(
+            f"{DISCORD_API}/users/@me",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if user_resp.status_code != 200:
+        return HTMLResponse("<h2>❌ ユーザー情報取得失敗</h2>", status_code=500)
+
+    user = user_resp.json()
+    # セッションに必要な情報だけ保存
+    request.session["user"] = {
+        "id":            user["id"],
+        "username":      user["username"],
+        "global_name":   user.get("global_name") or user["username"],
+        "avatar":        user.get("avatar"),
+    }
+
+    # 許可チェック
+    if ALLOWED_IDS and user["id"] not in ALLOWED_IDS:
+        return RedirectResponse("/auth/denied", status_code=302)
+
+    next_url = request.session.pop("next", "/")
+    return RedirectResponse(next_url, status_code=302)
+
+
+@app.get("/auth/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/auth/login", status_code=302)
+
+
+@app.get("/auth/denied", response_class=HTMLResponse)
+async def denied(request: Request):
+    user = get_current_user(request)
+    return templates.TemplateResponse("denied.html", {"request": request, "user": user})
+
+
+# ─────────────────────────────────────────────────────────
+# 保護されたページ（全ルートに user=Depends(auth_guard) を追加）
 # ─────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    # トップ: 損益サマリー + 今月収支
+async def index(request: Request, user: dict = Depends(auth_guard)):
     today = date.today()
     ym = today.strftime("%Y-%m")
     year = str(today.year)
@@ -57,6 +239,7 @@ async def index(request: Request):
 
     return templates.TemplateResponse("index.html", {
         "request": request,
+        "user": user,
         "monthly": monthly,
         "year": year,
         "total_rev": total_rev,
@@ -70,13 +253,12 @@ async def index(request: Request):
 
 
 @app.get("/pl", response_class=HTMLResponse)
-async def profit_loss(request: Request, year: str = Query(default=None)):
+async def profit_loss(request: Request, year: str = Query(default=None), user: dict = Depends(auth_guard)):
     if year is None:
         year = str(date.today().year)
     rows = await db.get_yearly_summary(year)
 
     import aiosqlite
-    period_filter = year + "%"
     async with aiosqlite.connect(DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
         async with conn.execute("""
@@ -85,7 +267,7 @@ async def profit_loss(request: Request, year: str = Query(default=None)):
             LEFT JOIN accounts a_d ON je.debit_account  = a_d.name
             LEFT JOIN accounts a_c ON je.credit_account = a_c.name
             WHERE je.entry_date LIKE ?
-        """, (period_filter,)) as cur:
+        """, (year + "%",)) as cur:
             entries = [dict(r) for r in await cur.fetchall()]
 
     rev = {}; exp = {}
@@ -95,44 +277,47 @@ async def profit_loss(request: Request, year: str = Query(default=None)):
 
     total_rev = sum(rev.values())
     total_exp = sum(exp.values())
-    net = total_rev - total_exp
 
     return templates.TemplateResponse("pl.html", {
-        "request": request,
+        "request": request, "user": user,
         "year": year,
         "revenues": sorted(rev.items(), key=lambda x: -x[1]),
         "expenses": sorted(exp.items(), key=lambda x: -x[1]),
-        "total_rev": total_rev,
-        "total_exp": total_exp,
-        "net": net,
-        "monthly_rows": rows,
-        "fmt": fmt,
+        "total_rev": total_rev, "total_exp": total_exp,
+        "net": total_rev - total_exp,
+        "monthly_rows": rows, "fmt": fmt,
     })
 
 
 @app.get("/bs", response_class=HTMLResponse)
-async def balance_sheet(request: Request):
+async def balance_sheet(request: Request, user: dict = Depends(auth_guard)):
     tb = await db.get_trial_balance()
-    assets    = [r for r in tb if r["account_type"] == "資産"]
-    liabs     = [r for r in tb if r["account_type"] == "負債"]
-    equity    = [r for r in tb if r["account_type"] == "資本"]
-    revenues  = [r for r in tb if r["account_type"] == "収益"]
-    expenses  = [r for r in tb if r["account_type"] == "費用"]
-
-    net_income = sum(r["balance"] for r in revenues) - sum(r["balance"] for r in expenses)
+    assets   = [r for r in tb if r["account_type"] == "資産"]
+    liabs    = [r for r in tb if r["account_type"] == "負債"]
+    equity   = [r for r in tb if r["account_type"] == "資本"]
+    revenues = [r for r in tb if r["account_type"] == "収益"]
+    expenses = [r for r in tb if r["account_type"] == "費用"]
+    net_income  = sum(r["balance"] for r in revenues) - sum(r["balance"] for r in expenses)
     total_asset = sum(r["balance"] for r in assets)
     total_liab  = sum(r["balance"] for r in liabs)
     total_eq    = sum(r["balance"] for r in equity) + net_income
 
     return templates.TemplateResponse("bs.html", {
-        "request": request,
-        "assets": assets,
-        "liabs": liabs,
-        "equity": equity,
-        "net_income": net_income,
-        "total_asset": total_asset,
-        "total_liab": total_liab,
-        "total_eq": total_eq,
+        "request": request, "user": user,
+        "assets": assets, "liabs": liabs, "equity": equity,
+        "net_income": net_income, "total_asset": total_asset,
+        "total_liab": total_liab, "total_eq": total_eq, "fmt": fmt,
+    })
+
+
+@app.get("/trial", response_class=HTMLResponse)
+async def trial_balance(request: Request, user: dict = Depends(auth_guard)):
+    rows = await db.get_trial_balance()
+    return templates.TemplateResponse("trial.html", {
+        "request": request, "user": user,
+        "rows": rows,
+        "total_debit":  sum(r["debit_total"]  for r in rows),
+        "total_credit": sum(r["credit_total"] for r in rows),
         "fmt": fmt,
     })
 
@@ -140,92 +325,62 @@ async def balance_sheet(request: Request):
 @app.get("/journal", response_class=HTMLResponse)
 async def journal(
     request: Request,
-    start: str = Query(default=None),
-    end: str = Query(default=None),
-    account: str = Query(default=None),
-    limit: int = Query(default=50),
+    start: str = Query(default=None), end: str = Query(default=None),
+    account: str = Query(default=None), limit: int = Query(default=50),
+    user: dict = Depends(auth_guard),
 ):
     limit = min(max(limit, 1), 200)
     entries = await db.get_journal_entries_filtered(start, end, account, limit)
     accounts = await db.get_accounts()
     return templates.TemplateResponse("journal.html", {
-        "request": request,
-        "entries": entries,
-        "accounts": accounts,
-        "start": start or "",
-        "end": end or "",
-        "account": account or "",
-        "limit": limit,
-        "fmt": fmt,
+        "request": request, "user": user,
+        "entries": entries, "accounts": accounts,
+        "start": start or "", "end": end or "",
+        "account": account or "", "limit": limit, "fmt": fmt,
     })
 
 
 @app.get("/events", response_class=HTMLResponse)
-async def events_page(request: Request):
+async def events_page(request: Request, user: dict = Depends(auth_guard)):
     event_names = await db.get_events()
-    summaries = []
-    for ev in event_names:
-        s = await db.get_event_summary(ev)
-        summaries.append(s)
+    summaries = [await db.get_event_summary(ev) for ev in event_names]
     return templates.TemplateResponse("events.html", {
-        "request": request,
-        "summaries": summaries,
-        "fmt": fmt,
+        "request": request, "user": user, "summaries": summaries, "fmt": fmt,
     })
 
 
 @app.get("/goods", response_class=HTMLResponse)
-async def goods_page(request: Request):
-    inv = await db.get_goods_inventory_summary()
-    txs = await db.get_goods_transactions(limit=50)
+async def goods_page(request: Request, user: dict = Depends(auth_guard)):
     return templates.TemplateResponse("goods.html", {
-        "request": request,
-        "inventory": inv,
-        "transactions": txs,
+        "request": request, "user": user,
+        "inventory": await db.get_goods_inventory_summary(),
+        "transactions": await db.get_goods_transactions(limit=50),
         "fmt": fmt,
     })
 
 
 @app.get("/tax", response_class=HTMLResponse)
-async def tax_page(request: Request, period: str = Query(default=None)):
+async def tax_page(request: Request, period: str = Query(default=None), user: dict = Depends(auth_guard)):
     if period is None:
         period = str(date.today().year)
-    result = await db.get_tax_summary(period)
     return templates.TemplateResponse("tax.html", {
-        "request": request,
-        "result": result,
-        "period": period,
-        "fmt": fmt,
+        "request": request, "user": user,
+        "result": await db.get_tax_summary(period),
+        "period": period, "fmt": fmt,
     })
 
 
 @app.get("/taxreturn", response_class=HTMLResponse)
-async def taxreturn_page(request: Request, year: str = Query(default=None)):
+async def taxreturn_page(request: Request, year: str = Query(default=None), user: dict = Depends(auth_guard)):
     if year is None:
         year = str(date.today().year)
-    result = await db.get_tax_return_summary(year)
     return templates.TemplateResponse("taxreturn.html", {
-        "request": request,
-        "result": result,
-        "year": year,
-        "fmt": fmt,
-    })
-
-
-@app.get("/trial", response_class=HTMLResponse)
-async def trial_balance(request: Request):
-    rows = await db.get_trial_balance()
-    total_debit  = sum(r["debit_total"]  for r in rows)
-    total_credit = sum(r["credit_total"] for r in rows)
-    return templates.TemplateResponse("trial.html", {
-        "request": request,
-        "rows": rows,
-        "total_debit": total_debit,
-        "total_credit": total_credit,
-        "fmt": fmt,
+        "request": request, "user": user,
+        "result": await db.get_tax_return_summary(year),
+        "year": year, "fmt": fmt,
     })
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("dashboard:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("dashboard:app", host="0.0.0.0", port=DASHBOARD_PORT, reload=False)
