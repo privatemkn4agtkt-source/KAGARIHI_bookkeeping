@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # ── 変数（必要に応じて変更） ─────────────────────────────────────────────────
-PROJECT_ID="your-gcp-project-id"          # gcloud projects list で確認
+PROJECT_ID="project-252ce045-7241-4267-8ec"  # gcloud projects list で確認
 VM_NAME="kagarihi-bot"
 ZONE="us-central1-a"                       # 無料枠対象: us-central1 / us-west1 / us-east1
 MACHINE_TYPE="e2-micro"                    # 無料枠: e2-micro
