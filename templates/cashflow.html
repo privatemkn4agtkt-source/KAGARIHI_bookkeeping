@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}キャッシュフロー計算書 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>💰 キャッシュフロー計算書</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>期間（YYYY または YYYY-MM）</label><input type="text" name="period" value="{{ period }}" placeholder="2025" style="width:140px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">営業活動</div>
+    <div class="card-value {{ 'green' if cf.operating_net >= 0 else 'red' }}">{{ fmt(cf.operating_net) }}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;">収入 {{ fmt(cf.operating_in) }} / 支出 {{ fmt(cf.operating_out) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">投資活動</div>
+    <div class="card-value {{ 'green' if cf.investing_net >= 0 else 'red' }}">{{ fmt(cf.investing_net) }}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;">収入 {{ fmt(cf.investing_in) }} / 支出 {{ fmt(cf.investing_out) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">財務活動</div>
+    <div class="card-value {{ 'green' if cf.financing_net >= 0 else 'red' }}">{{ fmt(cf.financing_net) }}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;">収入 {{ fmt(cf.financing_in) }} / 支出 {{ fmt(cf.financing_out) }}</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-title">現金増減額合計</div>
+  <div class="card-value {{ 'green' if cf.net_change >= 0 else 'red' }}" style="font-size:36px;">{{ fmt(cf.net_change) }}</div>
+</div>
+
+{% set breakdown = cf.source_breakdown %}
+{% set has_breakdown = breakdown.values() | selectattr('in') | list or breakdown.values() | selectattr('out') | list %}
+{% if has_breakdown %}
+<div class="card">
+  <h2>収益源別内訳</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>収益源</th>
+        <th class="text-right">収入</th>
+        <th class="text-right">支出</th>
+        <th class="text-right">純増減</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for src, vals in breakdown.items() %}
+      {% if vals['in'] > 0 or vals['out'] > 0 %}
+      {% set net = vals['in'] - vals['out'] %}
+      <tr>
+        <td><strong>{{ src }}</strong></td>
+        <td class="text-right amount pos">{{ fmt(vals['in']) }}</td>
+        <td class="text-right amount neg">{{ fmt(vals['out']) }}</td>
+        <td class="text-right amount {{ 'pos' if net >= 0 else 'neg' }}">{{ fmt(net) }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}勘定科目一覧 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📂 勘定科目一覧</h1>
+
+{% set type_order = ["資産", "負債", "資本", "収益", "費用"] %}
+{% set badge_class = {"資産": "badge-asset", "負債": "badge-liab", "資本": "badge-eq", "収益": "badge-rev", "費用": "badge-exp"} %}
+
+<div class="grid grid-2">
+{% for type in type_order %}
+{% set items = accounts | selectattr("account_type", "equalto", type) | list %}
+{% if items %}
+<div class="card">
+  <h2>{{ type }}</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>科目名</th>
+        <th>種別</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in items %}
+      <tr>
+        <td><strong>{{ a.name }}</strong></td>
+        <td><span class="badge {{ badge_class[type] }}">{{ type }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}立替精算表 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>💳 立替精算表</h1>
+
+{% if totals %}
+<div class="grid grid-{{ [totals|length, 4]|min }}" style="margin-bottom:24px;">
+  {% for name, amt in totals %}
+  <div class="card">
+    <div class="card-title">{{ name }}</div>
+    <div class="card-value gold">{{ fmt(amt) }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if advances %}
+<div class="card">
+  <h2>未精算一覧（{{ advances|length }} 件）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>日付</th>
+        <th>メンバー</th>
+        <th class="text-right">金額</th>
+        <th>摘要</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in advances %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">#{{ '%04d' % a.id }}</td>
+        <td>{{ a.entry_date }}</td>
+        <td><strong>{{ a.paid_by }}</strong></td>
+        <td class="text-right amount gold">{{ fmt(a.amount) }}</td>
+        <td>{{ a.description }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="color:var(--muted);text-align:center;padding:40px;">
+  未精算の立替はありません。
+</div>
+{% endif %}
+{% endblock %}

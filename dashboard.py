@@ -65,11 +65,12 @@ NAV_SECTIONS = [
     {
         "label": "財務諸表",
         "items": [
-            {"path": "/pl",     "icon": "📊", "label": "損益計算書"},
-            {"path": "/bs",     "icon": "🏦", "label": "貸借対照表"},
-            {"path": "/trial",  "icon": "📋", "label": "試算表"},
-            {"path": "/ledger", "icon": "📖", "label": "総勘定元帳"},
-            {"path": "/budget", "icon": "🎯", "label": "予算実績対比"},
+            {"path": "/pl",        "icon": "📊", "label": "損益計算書"},
+            {"path": "/bs",        "icon": "🏦", "label": "貸借対照表"},
+            {"path": "/trial",     "icon": "📋", "label": "試算表"},
+            {"path": "/cashflow",  "icon": "💰", "label": "キャッシュフロー"},
+            {"path": "/ledger",    "icon": "📖", "label": "総勘定元帳"},
+            {"path": "/budget",    "icon": "🎯", "label": "予算実績対比"},
         ],
     },
     {
@@ -84,6 +85,7 @@ NAV_SECTIONS = [
         "items": [
             {"path": "/journal",   "icon": "📒", "label": "仕訳帳"},
             {"path": "/events",    "icon": "🎸", "label": "ライブ収支"},
+            {"path": "/advances",  "icon": "💳", "label": "立替精算表"},
             {"path": "/goods",     "icon": "📦", "label": "グッズ在庫"},
         ],
     },
@@ -98,6 +100,7 @@ NAV_SECTIONS = [
         "label": "管理",
         "items": [
             {"path": "/members",     "icon": "👥", "label": "メンバー管理"},
+            {"path": "/accounts",    "icon": "📂", "label": "勘定科目一覧"},
             {"path": "/storage",     "icon": "💾", "label": "ストレージ確認"},
             {"path": "/permissions", "icon": "🔑", "label": "許可管理"},
         ],
@@ -643,9 +646,68 @@ async def budget_page(
     if period is None:
         period = date.today().strftime("%Y-%m")
     rows = await db.get_budget_vs_actual(period)
+    accounts = await db.get_accounts()
     return templates.TemplateResponse("budget.html", {
         "request": request, "user": user,
-        "rows": rows, "period": period, "fmt": fmt,
+        "rows": rows, "period": period, "accounts": accounts, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.post("/budget/set")
+async def budget_set(
+    request: Request,
+    account_name: str = Form(...),
+    period: str = Form(...),
+    amount: int = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    if not await db.account_exists(account_name):
+        return RedirectResponse(f"/budget?period={period}", status_code=303)
+    await db.set_budget(account_name, period, amount)
+    return RedirectResponse(f"/budget?period={period}", status_code=303)
+
+
+@app.get("/cashflow", response_class=HTMLResponse)
+async def cashflow_page(
+    request: Request,
+    period: str = Query(default=None),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/cashflow")
+    if period is None:
+        period = str(date.today().year)
+    cf = await db.get_cash_flow(period)
+    return templates.TemplateResponse("cashflow.html", {
+        "request": request, "user": user,
+        "cf": cf, "period": period, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.get("/advances", response_class=HTMLResponse)
+async def advances_page(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/advances")
+    advances = await db.get_advances(settled=False)
+    totals: dict[str, int] = {}
+    for a in advances:
+        totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
+    return templates.TemplateResponse("advances.html", {
+        "request": request, "user": user,
+        "advances": advances,
+        "totals": sorted(totals.items(), key=lambda x: -x[1]),
+        "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.get("/accounts", response_class=HTMLResponse)
+async def accounts_page(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/accounts")
+    accounts = await db.get_accounts()
+    return templates.TemplateResponse("accounts.html", {
+        "request": request, "user": user,
+        "accounts": accounts,
         "nav_sections": await sorted_nav_sections(),
     })
 

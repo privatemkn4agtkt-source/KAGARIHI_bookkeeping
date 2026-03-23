@@ -52,8 +52,30 @@
 </div>
 {% else %}
 <div class="card" style="color:var(--muted);text-align:center;padding:40px;">
-  {{ period }} に予算設定がありません。<br>
-  Discord の /予算設定 コマンドで予算を設定してください。
+  {{ period }} に予算設定がありません。下のフォームから設定してください。
 </div>
 {% endif %}
+
+<div class="card">
+  <h2>予算を設定する</h2>
+  <form method="post" action="/budget/set" class="filter-bar" style="margin-bottom:0;">
+    <div>
+      <label>勘定科目</label>
+      <select name="account_name" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:13px;">
+        {% for a in accounts %}
+        <option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>期間（YYYY-MM または YYYY）</label>
+      <input type="text" name="period" value="{{ period }}" placeholder="2025-04" style="width:140px;">
+    </div>
+    <div>
+      <label>予算金額（円）</label>
+      <input type="number" name="amount" min="0" placeholder="50000" style="width:120px;">
+    </div>
+    <button class="btn btn-primary" type="submit">設定</button>
+  </form>
+</div>
 {% endblock %}

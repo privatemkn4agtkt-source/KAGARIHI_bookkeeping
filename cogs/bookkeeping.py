@@ -300,137 +300,6 @@ class Bookkeeping(commands.Cog):
         view = CancelEntryView(entry_id, interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view)
 
-    # -------------------------------------------------------------------------
-    # /試算表
-    # -------------------------------------------------------------------------
-    @app_commands.command(name="試算表", description="残高試算表を表示します")
-    async def trial_balance(self, interaction: discord.Interaction):
-        rows = await db.get_trial_balance()
-
-        if not rows:
-            await interaction.response.send_message("仕訳がまだありません。", ephemeral=True)
-            return
-
-        type_order = ["資産", "負債", "資本", "収益", "費用"]
-        sections: dict[str, list] = {t: [] for t in type_order}
-        for r in rows:
-            if r["account_type"] in sections:
-                sections[r["account_type"]].append(r)
-
-        embed = discord.Embed(title="📊 残高試算表", color=discord.Color.gold())
-        total_debit = 0
-        total_credit = 0
-
-        for acc_type in type_order:
-            items = sections[acc_type]
-            if not items:
-                continue
-            lines = []
-            for r in items:
-                lines.append(
-                    f"　{r['name']}: {fmt_amount(r['balance'])}"
-                    f"（借方 {fmt_amount(r['debit_total'])} / 貸方 {fmt_amount(r['credit_total'])}）"
-                )
-                total_debit += r["debit_total"]
-                total_credit += r["credit_total"]
-            embed.add_field(name=f"【{acc_type}】", value=_truncate("\n".join(lines)), inline=False)
-
-        embed.set_footer(text=f"借方合計: {fmt_amount(total_debit)}　貸方合計: {fmt_amount(total_credit)}")
-        await interaction.response.send_message(embed=embed)
-
-    # -------------------------------------------------------------------------
-    # /貸借対照表
-    # -------------------------------------------------------------------------
-    @app_commands.command(name="貸借対照表", description="貸借対照表（BS）を表示します")
-    async def balance_sheet(self, interaction: discord.Interaction):
-        rows = await db.get_trial_balance()
-
-        assets = [r for r in rows if r["account_type"] == "資産"]
-        liabilities = [r for r in rows if r["account_type"] == "負債"]
-        equities = [r for r in rows if r["account_type"] == "資本"]
-        revenues = [r for r in rows if r["account_type"] == "収益"]
-        expenses = [r for r in rows if r["account_type"] == "費用"]
-        net_income = sum(r["balance"] for r in revenues) - sum(r["balance"] for r in expenses)
-
-        total_assets = sum(r["balance"] for r in assets)
-        total_liab = sum(r["balance"] for r in liabilities)
-        total_equity = sum(r["balance"] for r in equities) + net_income
-
-        embed = discord.Embed(title="📋 貸借対照表", color=discord.Color.blurple())
-
-        def fmt_lines(items):
-            return "\n".join(f"　{r['name']}: {fmt_amount(r['balance'])}" for r in items) or "　（なし）"
-
-        embed.add_field(name="【資産】", value=_truncate(fmt_lines(assets)), inline=True)
-        embed.add_field(
-            name="【負債・資本】",
-            value=_truncate(fmt_lines(liabilities) + f"\n　当期純利益: {fmt_amount(net_income)}\n" + fmt_lines(equities)),
-            inline=True,
-        )
-        embed.add_field(name="資産合計", value=fmt_amount(total_assets), inline=True)
-        embed.add_field(name="負債・資本合計", value=fmt_amount(total_liab + total_equity), inline=True)
-        await interaction.response.send_message(embed=embed)
-
-    # =========================================================================
-    # キャッシュフロー計算書
-    # =========================================================================
-
-    @app_commands.command(name="キャッシュフロー計算書", description="キャッシュフロー計算書（直接法）を表示します")
-    @app_commands.describe(期間="対象期間 YYYY または YYYY-MM（省略時: 今年）")
-    async def cash_flow(self, interaction: discord.Interaction, 期間: str | None = None):
-        period = 期間 or str(date.today())[:4]
-        cf = await db.get_cash_flow(period)
-
-        def cf_field(in_: int, out_: int, net: int) -> str:
-            sign = "+" if net >= 0 else ""
-            return (
-                f"　収入: {fmt_amount(in_)}\n"
-                f"　支出: {fmt_amount(out_)}\n"
-                f"　**小計: {sign}{fmt_amount(net)}**"
-            )
-
-        net_color = discord.Color.blue() if cf["net_change"] >= 0 else discord.Color.red()
-        embed = discord.Embed(title=f"💰 キャッシュフロー計算書（{period}）", color=net_color)
-        embed.add_field(
-            name="【営業活動によるCF】",
-            value=cf_field(cf["operating_in"], cf["operating_out"], cf["operating_net"]),
-            inline=False,
-        )
-        embed.add_field(
-            name="【投資活動によるCF】",
-            value=cf_field(cf["investing_in"], cf["investing_out"], cf["investing_net"]),
-            inline=False,
-        )
-        embed.add_field(
-            name="【財務活動によるCF】",
-            value=cf_field(cf["financing_in"], cf["financing_out"], cf["financing_net"]),
-            inline=False,
-        )
-        sign = "+" if cf["net_change"] >= 0 else ""
-        embed.add_field(name="現金増減額", value=f"**{sign}{fmt_amount(cf['net_change'])}**", inline=False)
-
-        # ソース別内訳
-        SOURCE_ICONS = {"ライブ": "🎸", "グッズ": "👕", "Booth": "🛒", "Fanbox": "💛"}
-        breakdown_lines = []
-        for src, vals in cf["source_breakdown"].items():
-            net = vals["in"] - vals["out"]
-            if vals["in"] == 0 and vals["out"] == 0:
-                continue
-            sign_s = "+" if net >= 0 else ""
-            icon = SOURCE_ICONS.get(src, "")
-            breakdown_lines.append(
-                f"{icon} **{src}**: 収入 {fmt_amount(vals['in'])} / 支出 {fmt_amount(vals['out'])}　→ **{sign_s}{fmt_amount(net)}**"
-            )
-        if breakdown_lines:
-            embed.add_field(
-                name="【収益源別内訳】",
-                value=_truncate("\n".join(breakdown_lines)),
-                inline=False,
-            )
-
-        embed.set_footer(text="現金・普通預金を対象に直接法で集計")
-        await interaction.response.send_message(embed=embed)
-
     # =========================================================================
     # イベント管理
     # =========================================================================
@@ -446,18 +315,6 @@ class Bookkeeping(commands.Cog):
             )
         else:
             await interaction.response.send_message(f"❌ 「{名前}」はすでに登録されています。", ephemeral=True)
-
-    @app_commands.command(name="イベント一覧", description="登録済みのイベント一覧を表示します")
-    async def list_events(self, interaction: discord.Interaction):
-        events = await db.get_events()
-        if not events:
-            await interaction.response.send_message(
-                "イベントがまだ登録されていません。`/イベント作成` で追加してください。", ephemeral=True
-            )
-            return
-        embed = discord.Embed(title="🎸 イベント一覧", color=discord.Color.purple())
-        embed.description = "\n".join(f"　{e}" for e in events)
-        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="イベント削除", description="イベントタグを削除します（確認あり）")
     @app_commands.describe(名前="削除するイベント名")
@@ -478,90 +335,8 @@ class Bookkeeping(commands.Cog):
         )
 
     # =========================================================================
-    # ライブ収支
-    # =========================================================================
-
-    @app_commands.command(name="ライブ収支", description="イベント別の収支を表示します")
-    @app_commands.describe(イベント名="対象のイベント名")
-    @app_commands.autocomplete(イベント名=_event_autocomplete)
-    async def event_summary(self, interaction: discord.Interaction, イベント名: str):
-        summary = await db.get_event_summary(イベント名)
-        if summary["entry_count"] == 0:
-            await interaction.response.send_message(f"「{イベント名}」に紐づいた仕訳がありません。", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"🎸 ライブ収支: {イベント名}",
-            color=discord.Color.green() if summary["net"] >= 0 else discord.Color.red(),
-        )
-        rev_lines = [f"　{k}: {fmt_amount(v)}" for k, v in summary["revenues"].items()] or ["　（なし）"]
-        exp_lines = [f"　{k}: {fmt_amount(v)}" for k, v in summary["expenses"].items()] or ["　（なし）"]
-
-        embed.add_field(name="【収益】", value=_truncate("\n".join(rev_lines)), inline=False)
-        embed.add_field(name="収益合計", value=fmt_amount(summary["total_revenue"]), inline=True)
-        embed.add_field(name="【費用】", value=_truncate("\n".join(exp_lines)), inline=False)
-        embed.add_field(name="費用合計", value=fmt_amount(summary["total_expense"]), inline=True)
-        net = summary["net"]
-        embed.add_field(
-            name="当期純利益" if net >= 0 else "当期純損失",
-            value=fmt_amount(abs(net)),
-            inline=False,
-        )
-        embed.set_footer(text=f"関連仕訳数: {summary['entry_count']} 件")
-        await interaction.response.send_message(embed=embed)
-
-    # =========================================================================
     # 予算
     # =========================================================================
-
-    @app_commands.command(name="予算設定", description="勘定科目ごとの予算を設定します")
-    @app_commands.describe(
-        勘定科目="予算を設定する科目",
-        期間="対象期間 YYYY-MM または YYYY",
-        金額="予算金額（円）",
-    )
-    @app_commands.autocomplete(勘定科目=_account_autocomplete)
-    async def set_budget(self, interaction: discord.Interaction, 勘定科目: str, 期間: str, 金額: int):
-        if not await db.account_exists(勘定科目):
-            await interaction.response.send_message(f"勘定科目「{勘定科目}」が見つかりません。", ephemeral=True)
-            return
-        if 金額 < 0:
-            await interaction.response.send_message("金額は0以上を指定してください。", ephemeral=True)
-            return
-        await db.set_budget(勘定科目, 期間, 金額)
-        await interaction.response.send_message(
-            f"✅ 「{勘定科目}」の {期間} 予算を {fmt_amount(金額)} に設定しました。", ephemeral=True
-        )
-
-    @app_commands.command(name="予算実績対比表", description="予算と実績を比較します")
-    @app_commands.describe(期間="対象期間 YYYY-MM または YYYY（省略時: 今月）")
-    async def budget_vs_actual(self, interaction: discord.Interaction, 期間: str | None = None):
-        period = 期間 or str(date.today())[:7]
-        rows = await db.get_budget_vs_actual(period)
-
-        if not rows:
-            await interaction.response.send_message(
-                f"{period} の予算が設定されていません。`/予算設定` で設定してください。", ephemeral=True
-            )
-            return
-
-        lines = []
-        for r in rows:
-            over = r["actual"] > r["budget"]
-            icon = "🔴" if over else ("🟡" if r["ratio"] >= 80 else "🟢")
-            lines.append(
-                f"{icon} **{r['account_name']}**\n"
-                f"　予算: {fmt_amount(r['budget'])}　実績: {fmt_amount(r['actual'])}　"
-                f"差異: {fmt_amount(r['diff'])}（{r['ratio']:.1f}%使用）"
-            )
-
-        embed = discord.Embed(
-            title=f"📊 予算実績対比表: {period}",
-            description=_truncate("\n".join(lines), 4000),
-            color=discord.Color.purple(),
-        )
-        embed.set_footer(text="🟢 80%未満 🟡 80%以上 🔴 予算超過")
-        await interaction.response.send_message(embed=embed)
 
     # =========================================================================
     # 立替管理
@@ -615,32 +390,6 @@ class Bookkeeping(commands.Cog):
         embed.set_footer(text=f"精算時は /立替精算済み {advance_id} を使用してください")
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="立替精算表", description="未精算の立替一覧を表示します")
-    async def advance_report(self, interaction: discord.Interaction):
-        advances = await db.get_advances(settled=False)
-        if not advances:
-            await interaction.response.send_message("未精算の立替はありません。", ephemeral=True)
-            return
-
-        totals: dict[str, int] = {}
-        for a in advances:
-            totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
-
-        lines = [
-            f"`#{a['id']:04d}` {a['entry_date']} **{a['paid_by']}** {fmt_amount(a['amount'])} {a['description']}"
-            for a in advances[:20]
-        ]
-        total_lines = [f"　{name}: {fmt_amount(amt)}" for name, amt in totals.items()]
-
-        embed = discord.Embed(
-            title=f"💳 立替精算表（未精算: {len(advances)} 件）",
-            description="\n".join(lines),
-            color=discord.Color.orange(),
-        )
-        embed.add_field(name="メンバー別合計", value="\n".join(total_lines), inline=False)
-        embed.set_footer(text="`/立替精算済み 立替id` で精算済みにできます")
-        await interaction.response.send_message(embed=embed)
-
     @app_commands.command(name="立替精算済み", description="指定した立替を精算済みにします")
     @app_commands.describe(
         立替id="精算済みにする立替のID（/立替精算表 で確認）",
@@ -677,23 +426,6 @@ class Bookkeeping(commands.Cog):
     # =========================================================================
     # 勘定科目管理
     # =========================================================================
-
-    @app_commands.command(name="勘定科目一覧", description="登録されている勘定科目を一覧表示します")
-    async def list_accounts(self, interaction: discord.Interaction):
-        accounts = await db.get_accounts()
-
-        type_order = ["資産", "負債", "資本", "収益", "費用"]
-        sections: dict[str, list[str]] = {t: [] for t in type_order}
-        for a in accounts:
-            if a["account_type"] in sections:
-                sections[a["account_type"]].append(a["name"])
-
-        embed = discord.Embed(title="📂 勘定科目一覧", color=discord.Color.teal())
-        for t in type_order:
-            names = sections[t]
-            if names:
-                embed.add_field(name=f"【{t}】", value="、".join(names), inline=False)
-        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="勘定科目削除", description="勘定科目を削除します（仕訳で使用中の科目は削除不可）")
     @app_commands.describe(名前="削除する勘定科目名")
@@ -897,13 +629,6 @@ class Bookkeeping(commands.Cog):
         msg = f"✅ 仕訳 #{仕訳id:04d} のイベントタグを「{new_tag}」に変更しました。" if new_tag else f"✅ 仕訳 #{仕訳id:04d} のイベントタグを解除しました。"
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @app_commands.command(name="ストレージ確認", description="ディスク使用量とDB情報を表示します")
-    async def storage_status(self, interaction: discord.Interaction):
-        info = await db.get_storage_info()
-        embed = _storage_embed(info)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
     # =========================================================================
     # グッズ在庫管理
     # =========================================================================
@@ -1045,67 +770,6 @@ class Bookkeeping(commands.Cog):
             embed.add_field(name="イベント", value=イベント, inline=True)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="グッズ在庫", description="グッズの現在庫と売上サマリーを表示します")
-    async def goods_inventory(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        summary = await db.get_goods_inventory_summary()
-        if not summary:
-            await interaction.followup.send("グッズが登録されていません。`/グッズ登録` で追加してください。", ephemeral=True)
-            return
-
-        embed = discord.Embed(title="📦 グッズ在庫サマリー", color=discord.Color.blue())
-        total_inv_value = 0
-        total_sales = 0
-        total_profit = 0
-        lines = []
-        for g in summary:
-            inv_val = g["inventory_value"]
-            total_inv_value += inv_val
-            total_sales += g["total_sales_amount"]
-            total_profit += g["gross_profit"]
-            lines.append(
-                f"**{g['name']}**　在庫:{g['stock']}個　"
-                f"仕入計:{fmt_amount(g['total_purchase_amount'])}　"
-                f"売上計:{fmt_amount(g['total_sales_amount'])}　"
-                f"粗利:{fmt_amount(g['gross_profit'])}"
-            )
-        embed.description = "\n".join(lines)
-        embed.add_field(name="在庫評価額合計", value=fmt_amount(total_inv_value), inline=True)
-        embed.add_field(name="グッズ売上合計", value=fmt_amount(total_sales), inline=True)
-        embed.add_field(name="グッズ粗利合計", value=fmt_amount(total_profit), inline=True)
-        await interaction.followup.send(embed=embed)
-
-    @app_commands.command(name="グッズ履歴", description="グッズの仕入・販売履歴を表示します")
-    @app_commands.describe(
-        グッズ名="絞り込むグッズ名（省略時は全グッズ）",
-        件数="表示件数（最大50）",
-    )
-    @app_commands.autocomplete(グッズ名=_goods_autocomplete)
-    async def goods_history(
-        self,
-        interaction: discord.Interaction,
-        グッズ名: str | None = None,
-        件数: int = 15,
-    ):
-        await interaction.response.defer()
-        件数 = min(max(件数, 1), 50)
-        txs = await db.get_goods_transactions(グッズ名, 件数)
-        if not txs:
-            await interaction.followup.send("取引履歴がありません。", ephemeral=True)
-            return
-        lines = []
-        for t in txs:
-            icon = "📥" if t["tx_type"] == "仕入" else "💰"
-            lines.append(
-                f"{icon} `#{t['id']:04d}` {t['entry_date']} **{t['goods_name']}** "
-                f"{t['tx_type']} {t['quantity']}個 @{fmt_amount(t['unit_price'])} "
-                f"= {fmt_amount(t['total_amount'])}　{t['description']}"
-            )
-        title = f"📋 グッズ取引履歴{f'（{グッズ名}）' if グッズ名 else ''}"
-        embed = discord.Embed(title=title, color=discord.Color.blurple())
-        embed.description = _truncate("\n".join(lines))
-        await interaction.followup.send(embed=embed)
-
     @app_commands.command(name="グッズ削除", description="グッズを在庫管理から削除します（取引履歴がある場合は削除不可）")
     @app_commands.describe(グッズ名="削除するグッズ名")
     @app_commands.autocomplete(グッズ名=_goods_autocomplete)
@@ -1115,125 +779,6 @@ class Bookkeeping(commands.Cog):
             await interaction.response.send_message(f"✅ 「{グッズ名}」を削除しました。")
         else:
             await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-
-    # =========================================================================
-    # 消費税サマリー
-    # =========================================================================
-
-    @app_commands.command(name="消費税サマリー", description="消費税対応仕訳の集計を表示します")
-    @app_commands.describe(期間="集計期間 YYYY または YYYY-MM（省略時は全期間）")
-    async def tax_summary(self, interaction: discord.Interaction, 期間: str | None = None):
-        await interaction.response.defer()
-        result = await db.get_tax_summary(期間)
-        if not result["details"]:
-            await interaction.followup.send(
-                f"消費税が設定された仕訳がありません（期間: {result['period']}）。\n"
-                "`/仕訳` の `消費税率` パラメータで記録できます。",
-                ephemeral=True,
-            )
-            return
-
-        embed = discord.Embed(
-            title=f"🧾 消費税サマリー（{result['period']}）",
-            color=discord.Color.orange(),
-        )
-        embed.add_field(name="課税売上（税抜）", value=fmt_amount(result["taxable_revenue"]), inline=True)
-        embed.add_field(name="仮受消費税", value=fmt_amount(result["collected_tax"]), inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-        embed.add_field(name="課税仕入（税抜）", value=fmt_amount(result["taxable_expense"]), inline=True)
-        embed.add_field(name="仮払消費税", value=fmt_amount(result["paid_tax"]), inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        payable = result["tax_payable"]
-        payable_str = fmt_amount(abs(payable))
-        if payable > 0:
-            embed.add_field(name="納付消費税（概算）", value=f"▲ {payable_str}", inline=False)
-        elif payable < 0:
-            embed.add_field(name="還付消費税（概算）", value=f"＋ {payable_str}", inline=False)
-        else:
-            embed.add_field(name="納付消費税（概算）", value="0円", inline=False)
-
-        # 明細（最大15件）
-        detail_lines = []
-        for d in result["details"][:15]:
-            detail_lines.append(
-                f"`#{d['id']:04d}` {d['entry_date']} [{d['type']}] {d['description'][:20]} "
-                f"税込:{fmt_amount(d['amount_incl'])} 税額:{fmt_amount(d['tax_amount'])}"
-            )
-        if detail_lines:
-            embed.add_field(
-                name=f"明細（{len(result['details'])} 件中最大15件表示）",
-                value=_truncate("\n".join(detail_lines), 900),
-                inline=False,
-            )
-        embed.set_footer(text="※ 簡易計算です。正確な申告は税理士にご相談ください。")
-        await interaction.followup.send(embed=embed)
-
-    # =========================================================================
-    # 確定申告サマリー
-    # =========================================================================
-
-    @app_commands.command(name="確定申告サマリー", description="年間収支と推定所得税を確定申告ベースで表示します")
-    @app_commands.describe(年="対象年（YYYY形式、省略時は今年）")
-    async def tax_return_summary(self, interaction: discord.Interaction, 年: str | None = None):
-        await interaction.response.defer()
-        from datetime import date as _date
-        target_year = 年 or str(_date.today().year)
-        try:
-            int(target_year)
-            if len(target_year) != 4:
-                raise ValueError
-        except ValueError:
-            await interaction.followup.send("年は YYYY 形式（例: 2025）で入力してください。", ephemeral=True)
-            return
-
-        result = await db.get_tax_return_summary(target_year)
-
-        if result["total_revenue"] == 0 and result["total_expense"] == 0:
-            await interaction.followup.send(f"{target_year} 年の仕訳データがありません。", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"📋 確定申告サマリー（{target_year}年）",
-            color=discord.Color.gold(),
-            description="※ 青色申告65万円控除・基礎控除48万円を適用した概算です。",
-        )
-
-        # 収入
-        rev_lines = [f"　{k}: {fmt_amount(v)}" for k, v in sorted(result["revenues"].items(), key=lambda x: -x[1])]
-        embed.add_field(
-            name=f"収入合計: {fmt_amount(result['total_revenue'])}",
-            value="\n".join(rev_lines) or "（なし）",
-            inline=False,
-        )
-
-        # 経費
-        exp_lines = [f"　{k}: {fmt_amount(v)}" for k, v in sorted(result["expenses"].items(), key=lambda x: -x[1])]
-        embed.add_field(
-            name=f"経費合計: {fmt_amount(result['total_expense'])}",
-            value=_truncate("\n".join(exp_lines) or "（なし）", 500),
-            inline=False,
-        )
-
-        # 所得計算
-        calc_lines = [
-            f"事業所得: {fmt_amount(result['gross_income'])}",
-            f"青色申告特別控除: ▲{fmt_amount(result['blue_return_deduction'])}",
-            f"差引所得金額: {fmt_amount(result['taxable_income'])}",
-            f"基礎控除: ▲{fmt_amount(result['basic_deduction'])}",
-            f"課税所得: {fmt_amount(result['taxable_after_deductions'])}",
-        ]
-        embed.add_field(name="所得計算", value="\n".join(calc_lines), inline=False)
-
-        # 税額
-        tax_lines = [
-            f"所得税: {fmt_amount(result['income_tax'])}",
-            f"復興特別所得税 (2.1%): {fmt_amount(result['surtax'])}",
-            f"**合計納税額（概算）: {fmt_amount(result['total_tax'])}**",
-        ]
-        embed.add_field(name="税額", value="\n".join(tax_lines), inline=False)
-        embed.set_footer(text="※ 社会保険料控除等は含まれていません。正確な申告は税理士にご確認ください。")
-        await interaction.followup.send(embed=embed)
 
     # =========================================================================
     # ダッシュボード閲覧権限管理
