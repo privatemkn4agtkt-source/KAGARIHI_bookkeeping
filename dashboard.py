@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, Request, Query, Depends
+from fastapi import FastAPI, Request, Query, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -76,7 +76,6 @@ NAV_SECTIONS = [
             {"path": "/journal",   "icon": "📒", "label": "仕訳帳"},
             {"path": "/events",    "icon": "🎸", "label": "ライブ収支"},
             {"path": "/goods",     "icon": "📦", "label": "グッズ在庫"},
-            {"path": "/advances",  "icon": "💴", "label": "立替払い"},
         ],
     },
     {
@@ -84,12 +83,6 @@ NAV_SECTIONS = [
         "items": [
             {"path": "/tax",       "icon": "🧾", "label": "消費税サマリー"},
             {"path": "/taxreturn", "icon": "📋", "label": "確定申告サマリー"},
-        ],
-    },
-    {
-        "label": "管理",
-        "items": [
-            {"path": "/users", "icon": "👥", "label": "ユーザー管理"},
         ],
     },
 ]
@@ -272,6 +265,10 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
     events = await db.get_events()
     goods_list = await db.get_goods()
     members = await db.get_members()
+    unsettled_advances = await db.get_advances(settled=False)
+    advance_totals: dict[str, int] = {}
+    for a in unsettled_advances:
+        advance_totals[a["paid_by"]] = advance_totals.get(a["paid_by"], 0) + a["amount"]
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -284,6 +281,8 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
         "event_count": len(events),
         "goods_count": len(goods_list),
         "member_count": len(members),
+        "unsettled_advances": unsettled_advances,
+        "advance_totals": sorted(advance_totals.items(), key=lambda x: -x[1]),
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
@@ -432,77 +431,6 @@ async def taxreturn_page(request: Request, year: str = Query(default=None), user
         "year": year, "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
-
-
-@app.get("/advances", response_class=HTMLResponse)
-async def advances_page(
-    request: Request,
-    show_settled: str = Query(default="0"),
-    user: dict = Depends(auth_guard),
-):
-    await db.record_page_visit("/advances")
-    settled_flag = show_settled == "1"
-    unsettled = await db.get_advances(settled=False)
-    settled = await db.get_advances(settled=True) if settled_flag else []
-    totals: dict[str, int] = {}
-    for a in unsettled:
-        totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
-    return templates.TemplateResponse("advances.html", {
-        "request": request, "user": user,
-        "unsettled": unsettled,
-        "settled": settled,
-        "show_settled": settled_flag,
-        "totals": sorted(totals.items(), key=lambda x: -x[1]),
-        "fmt": fmt,
-        "nav_sections": await sorted_nav_sections(),
-    })
-
-
-@app.get("/users", response_class=HTMLResponse)
-async def users_page(
-    request: Request,
-    msg: str = Query(default=""),
-    user: dict = Depends(auth_guard),
-):
-    await db.record_page_visit("/users")
-    allowed = await db.get_allowed_users()
-    return templates.TemplateResponse("users.html", {
-        "request": request, "user": user,
-        "allowed_users": allowed,
-        "msg": msg,
-        "nav_sections": await sorted_nav_sections(),
-    })
-
-
-@app.post("/users/add")
-async def users_add(
-    request: Request,
-    discord_id: str = Form(...),
-    display_name: str = Form(default=""),
-    user: dict = Depends(auth_guard),
-):
-    discord_id = discord_id.strip()
-    if not discord_id.isdigit():
-        return RedirectResponse("/users?msg=error_invalid_id", status_code=302)
-    name = display_name.strip() or discord_id
-    added_by = user.get("global_name", user.get("username", "dashboard"))
-    ok = await db.add_allowed_user(discord_id, name, added_by)
-    msg = "added" if ok else "already_exists"
-    return RedirectResponse(f"/users?msg={msg}", status_code=302)
-
-
-@app.post("/users/remove")
-async def users_remove(
-    request: Request,
-    discord_id: str = Form(...),
-    user: dict = Depends(auth_guard),
-):
-    discord_id = discord_id.strip()
-    if discord_id == user["id"]:
-        return RedirectResponse("/users?msg=error_self", status_code=302)
-    ok = await db.remove_allowed_user(discord_id)
-    msg = "removed" if ok else "not_found"
-    return RedirectResponse(f"/users?msg={msg}", status_code=302)
 
 
 if __name__ == "__main__":
