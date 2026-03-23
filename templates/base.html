@@ -248,22 +248,12 @@
     <div class="logo">
       <span>🎸</span>KAGARIHI 会計
     </div>
-    <div class="section-label">概要</div>
-    <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>🏠 ダッシュボード</a>
-
-    <div class="section-label">財務諸表</div>
-    <a href="/pl"    {% if request.url.path == "/pl"    %}class="active"{% endif %}>📊 損益計算書</a>
-    <a href="/bs"    {% if request.url.path == "/bs"    %}class="active"{% endif %}>🏦 貸借対照表</a>
-    <a href="/trial" {% if request.url.path == "/trial" %}class="active"{% endif %}>📋 試算表</a>
-
-    <div class="section-label">明細</div>
-    <a href="/journal" {% if request.url.path == "/journal" %}class="active"{% endif %}>📒 仕訳帳</a>
-    <a href="/events"  {% if request.url.path == "/events"  %}class="active"{% endif %}>🎸 ライブ収支</a>
-    <a href="/goods"   {% if request.url.path == "/goods"   %}class="active"{% endif %}>📦 グッズ在庫</a>
-
-    <div class="section-label">税務</div>
-    <a href="/tax"       {% if request.url.path == "/tax"       %}class="active"{% endif %}>🧾 消費税サマリー</a>
-    <a href="/taxreturn" {% if request.url.path == "/taxreturn" %}class="active"{% endif %}>📋 確定申告サマリー</a>
+    {% for section in nav_sections %}
+    <div class="section-label">{{ section.label }}</div>
+    {% for item in section.items %}
+    <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
+    {% endfor %}
+    {% endfor %}
 
     {% if user %}
     <div class="user-area">

@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Query, Depends
+from fastapi import FastAPI, Form, Request, Query, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -50,6 +50,62 @@ DISCORD_OAUTH2 = "https://discord.com/oauth2/authorize"
 DISCORD_TOKEN  = "https://discord.com/api/oauth2/token"
 
 db.DB_PATH = DB_PATH
+
+# ─────────────────────────────────────────────────────────
+# ナビゲーション構造定義
+# ─────────────────────────────────────────────────────────
+
+NAV_SECTIONS = [
+    {
+        "label": "概要",
+        "items": [
+            {"path": "/",       "icon": "🏠", "label": "ダッシュボード"},
+        ],
+    },
+    {
+        "label": "財務諸表",
+        "items": [
+            {"path": "/pl",    "icon": "📊", "label": "損益計算書"},
+            {"path": "/bs",    "icon": "🏦", "label": "貸借対照表"},
+            {"path": "/trial", "icon": "📋", "label": "試算表"},
+        ],
+    },
+    {
+        "label": "明細",
+        "items": [
+            {"path": "/journal",   "icon": "📒", "label": "仕訳帳"},
+            {"path": "/events",    "icon": "🎸", "label": "ライブ収支"},
+            {"path": "/goods",     "icon": "📦", "label": "グッズ在庫"},
+            {"path": "/advances",  "icon": "💴", "label": "立替払い"},
+        ],
+    },
+    {
+        "label": "税務",
+        "items": [
+            {"path": "/tax",       "icon": "🧾", "label": "消費税サマリー"},
+            {"path": "/taxreturn", "icon": "📋", "label": "確定申告サマリー"},
+        ],
+    },
+    {
+        "label": "管理",
+        "items": [
+            {"path": "/users", "icon": "👥", "label": "ユーザー管理"},
+        ],
+    },
+]
+
+
+async def sorted_nav_sections() -> list:
+    """訪問回数が多い順にセクション内のアイテムをソートして返す"""
+    visits = await db.get_page_visits()
+    result = []
+    for section in NAV_SECTIONS:
+        sorted_items = sorted(
+            section["items"],
+            key=lambda x: -visits.get(x["path"], 0),
+        )
+        result.append({**section, "items": sorted_items})
+    return result
 
 
 # ─────────────────────────────────────────────────────────
@@ -202,6 +258,7 @@ async def denied(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/")
     today = date.today()
     ym = today.strftime("%Y-%m")
     year = str(today.year)
@@ -228,11 +285,13 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
         "goods_count": len(goods_list),
         "member_count": len(members),
         "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/pl", response_class=HTMLResponse)
 async def profit_loss(request: Request, year: str = Query(default=None), user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/pl")
     if year is None:
         year = str(date.today().year)
     rows = await db.get_yearly_summary(year)
@@ -265,11 +324,13 @@ async def profit_loss(request: Request, year: str = Query(default=None), user: d
         "total_rev": total_rev, "total_exp": total_exp,
         "net": total_rev - total_exp,
         "monthly_rows": rows, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/bs", response_class=HTMLResponse)
 async def balance_sheet(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/bs")
     tb = await db.get_trial_balance()
     assets   = [r for r in tb if r["account_type"] == "資産"]
     liabs    = [r for r in tb if r["account_type"] == "負債"]
@@ -286,11 +347,13 @@ async def balance_sheet(request: Request, user: dict = Depends(auth_guard)):
         "assets": assets, "liabs": liabs, "equity": equity,
         "net_income": net_income, "total_asset": total_asset,
         "total_liab": total_liab, "total_eq": total_eq, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/trial", response_class=HTMLResponse)
 async def trial_balance(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/trial")
     rows = await db.get_trial_balance()
     return templates.TemplateResponse("trial.html", {
         "request": request, "user": user,
@@ -298,6 +361,7 @@ async def trial_balance(request: Request, user: dict = Depends(auth_guard)):
         "total_debit":  sum(r["debit_total"]  for r in rows),
         "total_credit": sum(r["credit_total"] for r in rows),
         "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
@@ -308,6 +372,7 @@ async def journal(
     account: str = Query(default=None), limit: int = Query(default=50),
     user: dict = Depends(auth_guard),
 ):
+    await db.record_page_visit("/journal")
     limit = min(max(limit, 1), 200)
     entries = await db.get_journal_entries_filtered(start, end, account, limit)
     accounts = await db.get_accounts()
@@ -316,48 +381,128 @@ async def journal(
         "entries": entries, "accounts": accounts,
         "start": start or "", "end": end or "",
         "account": account or "", "limit": limit, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/events", response_class=HTMLResponse)
 async def events_page(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/events")
     event_names = await db.get_events()
     summaries = [await db.get_event_summary(ev) for ev in event_names]
     return templates.TemplateResponse("events.html", {
         "request": request, "user": user, "summaries": summaries, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/goods", response_class=HTMLResponse)
 async def goods_page(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/goods")
     return templates.TemplateResponse("goods.html", {
         "request": request, "user": user,
         "inventory": await db.get_goods_inventory_summary(),
         "transactions": await db.get_goods_transactions(limit=50),
         "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/tax", response_class=HTMLResponse)
 async def tax_page(request: Request, period: str = Query(default=None), user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/tax")
     if period is None:
         period = str(date.today().year)
     return templates.TemplateResponse("tax.html", {
         "request": request, "user": user,
         "result": await db.get_tax_summary(period),
         "period": period, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
 
 
 @app.get("/taxreturn", response_class=HTMLResponse)
 async def taxreturn_page(request: Request, year: str = Query(default=None), user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/taxreturn")
     if year is None:
         year = str(date.today().year)
     return templates.TemplateResponse("taxreturn.html", {
         "request": request, "user": user,
         "result": await db.get_tax_return_summary(year),
         "year": year, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.get("/advances", response_class=HTMLResponse)
+async def advances_page(
+    request: Request,
+    show_settled: str = Query(default="0"),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/advances")
+    settled_flag = show_settled == "1"
+    unsettled = await db.get_advances(settled=False)
+    settled = await db.get_advances(settled=True) if settled_flag else []
+    totals: dict[str, int] = {}
+    for a in unsettled:
+        totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
+    return templates.TemplateResponse("advances.html", {
+        "request": request, "user": user,
+        "unsettled": unsettled,
+        "settled": settled,
+        "show_settled": settled_flag,
+        "totals": sorted(totals.items(), key=lambda x: -x[1]),
+        "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_page(
+    request: Request,
+    msg: str = Query(default=""),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/users")
+    allowed = await db.get_allowed_users()
+    return templates.TemplateResponse("users.html", {
+        "request": request, "user": user,
+        "allowed_users": allowed,
+        "msg": msg,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.post("/users/add")
+async def users_add(
+    request: Request,
+    discord_id: str = Form(...),
+    display_name: str = Form(default=""),
+    user: dict = Depends(auth_guard),
+):
+    discord_id = discord_id.strip()
+    if not discord_id.isdigit():
+        return RedirectResponse("/users?msg=error_invalid_id", status_code=302)
+    name = display_name.strip() or discord_id
+    added_by = user.get("global_name", user.get("username", "dashboard"))
+    ok = await db.add_allowed_user(discord_id, name, added_by)
+    msg = "added" if ok else "already_exists"
+    return RedirectResponse(f"/users?msg={msg}", status_code=302)
+
+
+@app.post("/users/remove")
+async def users_remove(
+    request: Request,
+    discord_id: str = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    discord_id = discord_id.strip()
+    if discord_id == user["id"]:
+        return RedirectResponse("/users?msg=error_self", status_code=302)
+    ok = await db.remove_allowed_user(discord_id)
+    msg = "removed" if ok else "not_found"
+    return RedirectResponse(f"/users?msg={msg}", status_code=302)
 
 
 if __name__ == "__main__":

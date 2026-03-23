@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}立替払い – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>💴 立替払い一覧</h1>
+
+<!-- メンバー別合計 -->
+{% if totals %}
+<div class="card" style="margin-bottom:24px;">
+  <h2>未精算 メンバー別合計</h2>
+  <div class="grid grid-4">
+    {% for name, total in totals %}
+    <div style="text-align:center;">
+      <div class="card-title">{{ name }}</div>
+      <div style="font-size:22px;font-weight:700;color:var(--gold);">{{ fmt(total) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- 未精算一覧 -->
+<div class="card" style="margin-bottom:24px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <h2 style="margin:0;">未精算（{{ unsettled|length }} 件）</h2>
+    <a href="/advances?show_settled={{ '0' if show_settled else '1' }}" class="btn btn-primary" style="font-size:12px;padding:6px 12px;">
+      {% if show_settled %}精算済みを隠す{% else %}精算済みも表示{% endif %}
+    </a>
+  </div>
+  {% if unsettled %}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>日付</th>
+        <th>立替者</th>
+        <th>内容</th>
+        <th class="text-right">金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in unsettled %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">{{ "%04d"|format(a.id) }}</td>
+        <td>{{ a.entry_date }}</td>
+        <td><span class="badge badge-asset">{{ a.paid_by }}</span></td>
+        <td>{{ a.description }}</td>
+        <td class="text-right amount neutral">{{ fmt(a.amount) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="4" class="text-right">合計</td>
+        <td class="text-right amount neutral">{{ fmt(unsettled|sum(attribute='amount')) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <div style="color:var(--muted);padding:20px 0;">未精算の立替はありません。</div>
+  {% endif %}
+</div>
+
+<!-- 精算済み一覧（表示時のみ） -->
+{% if show_settled %}
+<div class="card">
+  <h2>精算済み（{{ settled|length }} 件）</h2>
+  {% if settled %}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>日付</th>
+        <th>立替者</th>
+        <th>内容</th>
+        <th class="text-right">金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in settled %}
+      <tr style="opacity:0.6;">
+        <td style="color:var(--muted);font-size:12px;">{{ "%04d"|format(a.id) }}</td>
+        <td>{{ a.entry_date }}</td>
+        <td><span class="badge badge-eq">{{ a.paid_by }}</span></td>
+        <td>{{ a.description }}</td>
+        <td class="text-right amount neutral">{{ fmt(a.amount) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="4" class="text-right">合計</td>
+        <td class="text-right amount neutral">{{ fmt(settled|sum(attribute='amount')) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <div style="color:var(--muted);padding:20px 0;">精算済みの記録はありません。</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div style="color:var(--muted);font-size:12px;text-align:right;margin-top:8px;">
+  立替の記録・精算は Discord の <code>/立替記録</code>・<code>/立替精算済み</code> コマンドで行えます
+</div>
+{% endblock %}

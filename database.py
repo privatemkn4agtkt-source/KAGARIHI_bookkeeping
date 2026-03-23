@@ -157,6 +157,13 @@ async def init_db():
             await db.execute("ALTER TABLE journal_entries ADD COLUMN tax_rate INTEGER DEFAULT 0")
         except Exception:
             pass
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS page_visits (
+                page TEXT PRIMARY KEY,
+                visit_count INTEGER NOT NULL DEFAULT 0,
+                last_visited TEXT
+            )
+        """)
         # 環境変数 ALLOWED_DISCORD_IDS の初回シード（既存レコードは無視）
         import os as _os
         _raw = _os.getenv("ALLOWED_DISCORD_IDS", "")
@@ -872,6 +879,31 @@ async def update_allowed_user_name(discord_user_id: str, display_name: str) -> N
             (display_name, discord_user_id),
         )
         await conn.commit()
+
+
+# =============================================================================
+# ページ訪問履歴（ナビゲーション順序の動的ソート用）
+# =============================================================================
+
+async def record_page_visit(page: str) -> None:
+    """ページ訪問をカウントアップする"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute("""
+            INSERT INTO page_visits (page, visit_count, last_visited)
+            VALUES (?, 1, datetime('now', 'localtime'))
+            ON CONFLICT(page) DO UPDATE SET
+                visit_count = visit_count + 1,
+                last_visited = datetime('now', 'localtime')
+        """, (page,))
+        await conn.commit()
+
+
+async def get_page_visits() -> dict:
+    """ページ → 訪問回数 の dict を返す"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute("SELECT page, visit_count FROM page_visits") as cur:
+            return {row["page"]: row["visit_count"] for row in await cur.fetchall()}
 
 
 # =============================================================================
