@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}ストレージ確認 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>💾 ストレージ確認</h1>
+
+<div class="grid grid-4" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">DBファイルサイズ</div>
+    <div class="card-value blue">{{ "%.1f"|format(storage.db_size / 1024) }} KB</div>
+  </div>
+  <div class="card">
+    <div class="card-title">仕訳件数</div>
+    <div class="card-value">{{ storage.entry_count }} 件</div>
+  </div>
+  <div class="card">
+    <div class="card-title">ディスク使用済み</div>
+    <div class="card-value {{ 'red' if storage.disk_percent > 90 else '' }}">
+      {{ "%.1f"|format(storage.disk_used / 1024 / 1024 / 1024) }} GB
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">ディスク空き容量</div>
+    <div class="card-value green">{{ "%.1f"|format(storage.disk_free / 1024 / 1024 / 1024) }} GB</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>ディスク使用率</h2>
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;">
+    <span style="font-size:32px;font-weight:700;color:{{ 'var(--red)' if storage.disk_percent > 90 else 'var(--text)' }};">
+      {{ "%.1f"|format(storage.disk_percent) }}%
+    </span>
+    {% if storage.disk_percent > 90 %}
+    <span class="badge" style="background:#3a1a1a;color:var(--red);font-size:13px;padding:4px 12px;">⚠️ 残り少ない</span>
+    {% endif %}
+  </div>
+  <div class="bar-track" style="height:14px;border-radius:7px;">
+    <div class="bar-fill {{ 'exp' if storage.disk_percent > 90 else 'rev' }}"
+      style="width:{{ storage.disk_percent|round|int }}%;border-radius:7px;"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px;">
+    <span>0 GB</span>
+    <span>合計: {{ "%.1f"|format(storage.disk_total / 1024 / 1024 / 1024) }} GB</span>
+  </div>
+</div>
+{% endblock %}

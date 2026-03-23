@@ -81,43 +81,4 @@
   Discordの /仕訳 コマンドで「消費税率」を指定して記録してください。
 </div>
 {% endif %}
-
-<!-- ストレージ確認 -->
-<div class="card">
-  <h2>💾 ストレージ確認</h2>
-  <div class="grid grid-4" style="margin-bottom:16px;">
-    <div>
-      <div class="card-title">DBファイルサイズ</div>
-      <div style="font-size:20px;font-weight:700;color:var(--accent2);">{{ "%.1f"|format(storage.db_size / 1024) }} KB</div>
-    </div>
-    <div>
-      <div class="card-title">仕訳件数</div>
-      <div style="font-size:20px;font-weight:700;">{{ storage.entry_count }} 件</div>
-    </div>
-    <div>
-      <div class="card-title">ディスク使用済み</div>
-      <div style="font-size:20px;font-weight:700;color:{{ 'var(--red)' if storage.disk_percent > 90 else 'var(--text)' }};">
-        {{ "%.1f"|format(storage.disk_used / 1024 / 1024 / 1024) }} GB
-      </div>
-    </div>
-    <div>
-      <div class="card-title">ディスク空き容量</div>
-      <div style="font-size:20px;font-weight:700;color:var(--green);">{{ "%.1f"|format(storage.disk_free / 1024 / 1024 / 1024) }} GB</div>
-    </div>
-  </div>
-  <div>
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-      <span style="font-size:13px;color:var(--muted);">ディスク使用率</span>
-      <span style="font-size:13px;font-weight:700;color:{{ 'var(--red)' if storage.disk_percent > 90 else 'var(--text)' }};">{{ "%.1f"|format(storage.disk_percent) }}%</span>
-      {% if storage.disk_percent > 90 %}<span class="badge" style="background:#3a1a1a;color:var(--red);">⚠️ 残り少ない</span>{% endif %}
-    </div>
-    <div class="bar-track" style="height:10px;">
-      <div class="bar-fill {{ 'exp' if storage.disk_percent > 90 else 'rev' }}"
-        style="width:{{ storage.disk_percent|round|int }}%;"></div>
-    </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:6px;">
-      合計: {{ "%.1f"|format(storage.disk_total / 1024 / 1024 / 1024) }} GB
-    </div>
-  </div>
-</div>
 {% endblock %}

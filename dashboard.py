@@ -98,6 +98,7 @@ NAV_SECTIONS = [
         "label": "管理",
         "items": [
             {"path": "/members",     "icon": "👥", "label": "メンバー管理"},
+            {"path": "/storage",     "icon": "💾", "label": "ストレージ確認"},
             {"path": "/permissions", "icon": "🔑", "label": "許可管理"},
         ],
     },
@@ -437,12 +438,10 @@ async def tax_page(request: Request, period: str = Query(default=None), user: di
     await db.record_page_visit("/tax")
     if period is None:
         period = str(date.today().year)
-    storage = await db.get_storage_info()
     return templates.TemplateResponse("tax.html", {
         "request": request, "user": user,
         "result": await db.get_tax_summary(period),
         "period": period, "fmt": fmt,
-        "storage": storage,
         "nav_sections": await sorted_nav_sections(),
     })
 
@@ -510,6 +509,17 @@ async def permissions_remove(
     if success:
         return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+を削除しました&ok=1", status_code=303)
     return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+が見つかりません&ok=0", status_code=303)
+
+
+@app.get("/storage", response_class=HTMLResponse)
+async def storage_page(request: Request, user: dict = Depends(auth_guard)):
+    await db.record_page_visit("/storage")
+    storage = await db.get_storage_info()
+    return templates.TemplateResponse("storage.html", {
+        "request": request, "user": user,
+        "storage": storage,
+        "nav_sections": await sorted_nav_sections(),
+    })
 
 
 @app.get("/members", response_class=HTMLResponse)
