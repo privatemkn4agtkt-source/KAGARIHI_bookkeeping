@@ -226,7 +226,16 @@ async def get_accounts_with_usage() -> list[dict]:
                       ON je.debit_account = a.name
                       OR je.credit_account = a.name
                GROUP BY a.name, a.account_type
-               ORDER BY usage_count DESC, a.name"""
+               ORDER BY usage_count DESC,
+                        CASE a.account_type
+                            WHEN '資産' THEN 1
+                            WHEN '費用' THEN 2
+                            WHEN '収益' THEN 3
+                            WHEN '負債' THEN 4
+                            WHEN '資本' THEN 5
+                            ELSE 6
+                        END,
+                        a.name"""
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
