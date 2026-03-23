@@ -61,7 +61,24 @@
 
 <!-- 取引履歴 -->
 <div class="card">
-  <h2>取引履歴（直近50件）</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <h2 style="margin:0;">取引履歴（直近100件）</h2>
+  </div>
+  <form method="get" action="/goods" class="filter-bar" style="margin-bottom:16px;">
+    <div>
+      <label>グッズ名で絞り込み</label>
+      <select name="goods_name">
+        <option value="">すべて</option>
+        {% for g in goods_list %}
+        <option value="{{ g.name }}" {% if selected_goods == g.name %}selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">絞り込み</button>
+    {% if selected_goods %}
+    <a href="/goods" class="btn" style="background:var(--surface2);color:var(--muted);">クリア</a>
+    {% endif %}
+  </form>
   <table>
     <thead>
       <tr>

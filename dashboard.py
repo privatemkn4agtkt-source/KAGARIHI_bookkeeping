@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Query, Depends
+from fastapi import FastAPI, Request, Query, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -83,6 +83,12 @@ NAV_SECTIONS = [
         "items": [
             {"path": "/tax",       "icon": "🧾", "label": "消費税サマリー"},
             {"path": "/taxreturn", "icon": "📋", "label": "確定申告サマリー"},
+        ],
+    },
+    {
+        "label": "管理",
+        "items": [
+            {"path": "/permissions", "icon": "🔑", "label": "許可管理"},
         ],
     },
 ]
@@ -270,6 +276,11 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
     for a in unsettled_advances:
         advance_totals[a["paid_by"]] = advance_totals.get(a["paid_by"], 0) + a["amount"]
 
+    # 税関連残高（源泉徴収預かり金・仮受消費税・仮払消費税）
+    _TAX_ACCOUNTS = {"源泉徴収預かり金", "仮受消費税", "仮払消費税"}
+    tb = await db.get_trial_balance()
+    tax_balances = {r["name"]: r["balance"] for r in tb if r["name"] in _TAX_ACCOUNTS}
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "user": user,
@@ -283,6 +294,7 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
         "member_count": len(members),
         "unsettled_advances": unsettled_advances,
         "advance_totals": sorted(advance_totals.items(), key=lambda x: -x[1]),
+        "tax_balances": tax_balances,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
@@ -396,12 +408,15 @@ async def events_page(request: Request, user: dict = Depends(auth_guard)):
 
 
 @app.get("/goods", response_class=HTMLResponse)
-async def goods_page(request: Request, user: dict = Depends(auth_guard)):
+async def goods_page(request: Request, goods_name: str = Query(default=None), user: dict = Depends(auth_guard)):
     await db.record_page_visit("/goods")
+    goods_list = await db.get_goods()
     return templates.TemplateResponse("goods.html", {
         "request": request, "user": user,
         "inventory": await db.get_goods_inventory_summary(),
-        "transactions": await db.get_goods_transactions(limit=50),
+        "transactions": await db.get_goods_transactions(goods_name=goods_name, limit=100),
+        "goods_list": goods_list,
+        "selected_goods": goods_name or "",
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
@@ -431,6 +446,58 @@ async def taxreturn_page(request: Request, year: str = Query(default=None), user
         "year": year, "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.get("/permissions", response_class=HTMLResponse)
+async def permissions_page(
+    request: Request,
+    msg: str = Query(default=None),
+    ok: int = Query(default=1),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/permissions")
+    users = await db.get_allowed_users()
+    return templates.TemplateResponse("permissions.html", {
+        "request": request, "user": user,
+        "users": users,
+        "current_user_id": user["id"],
+        "message": msg,
+        "message_ok": ok == 1,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.post("/permissions/add")
+async def permissions_add(
+    request: Request,
+    discord_id: str = Form(...),
+    display_name: str = Form(default=""),
+    user: dict = Depends(auth_guard),
+):
+    discord_id = discord_id.strip()
+    if not discord_id.isdigit():
+        return RedirectResponse("/permissions?msg=Discord+IDは数字のみで入力してください&ok=0", status_code=303)
+    name = display_name.strip() or discord_id
+    added_by = f"{user['global_name']}（{user['id']}）"
+    success = await db.add_allowed_user(discord_id, name, added_by)
+    if success:
+        return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+を追加しました&ok=1", status_code=303)
+    return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+はすでに登録されています&ok=0", status_code=303)
+
+
+@app.post("/permissions/remove")
+async def permissions_remove(
+    request: Request,
+    discord_id: str = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    discord_id = discord_id.strip()
+    if discord_id == user["id"]:
+        return RedirectResponse("/permissions?msg=自分自身の権限は削除できません&ok=0", status_code=303)
+    success = await db.remove_allowed_user(discord_id)
+    if success:
+        return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+を削除しました&ok=1", status_code=303)
+    return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+が見つかりません&ok=0", status_code=303)
 
 
 if __name__ == "__main__":

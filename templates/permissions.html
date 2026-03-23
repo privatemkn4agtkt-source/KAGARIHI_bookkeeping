@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}許可管理 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>🔑 ダッシュボード許可管理</h1>
+
+{% if message %}
+<div class="card" style="border-color:{{ 'var(--green)' if message_ok else 'var(--red)' }};margin-bottom:16px;padding:14px 20px;">
+  <span style="color:{{ 'var(--green)' if message_ok else 'var(--red)' }};font-weight:600;">
+    {{ '✅' if message_ok else '❌' }} {{ message }}
+  </span>
+</div>
+{% endif %}
+
+<!-- 許可ユーザー一覧 -->
+<div class="card">
+  <h2>許可ユーザー一覧（{{ users|length }} 名）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Discord ID</th>
+        <th>表示名</th>
+        <th>追加者</th>
+        <th>追加日</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td><code style="font-size:12px;color:var(--muted);">{{ u.discord_user_id }}</code></td>
+        <td><strong>{{ u.display_name or '—' }}</strong></td>
+        <td style="color:var(--muted);font-size:13px;">{{ u.added_by or '—' }}</td>
+        <td style="color:var(--muted);font-size:13px;">{{ u.added_at[:10] if u.added_at else '—' }}</td>
+        <td>
+          {% if u.discord_user_id != current_user_id %}
+          <form method="post" action="/permissions/remove" style="display:inline;">
+            <input type="hidden" name="discord_id" value="{{ u.discord_user_id }}">
+            <button type="submit" class="btn"
+              style="background:var(--surface2);color:var(--red);border:1px solid var(--red);padding:4px 12px;font-size:12px;"
+              onclick="return confirm('{{ u.display_name or u.discord_user_id }} の権限を削除しますか？')">削除</button>
+          </form>
+          {% else %}
+          <span style="color:var(--muted);font-size:12px;">（自分）</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center" style="color:var(--muted);padding:24px;">許可ユーザーが登録されていません</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ユーザー追加 -->
+<div class="card">
+  <h2>ユーザーを追加</h2>
+  <form method="post" action="/permissions/add" class="filter-bar" style="margin-bottom:0;">
+    <div>
+      <label>Discord ID（数字のみ）</label>
+      <input type="text" name="discord_id" placeholder="例: 682574338175664404"
+        style="width:220px;" required pattern="\d+" title="Discord IDは数字のみで入力してください">
+    </div>
+    <div>
+      <label>表示名（任意）</label>
+      <input type="text" name="display_name" placeholder="例: 田中ボーカル" style="width:160px;">
+    </div>
+    <button type="submit" class="btn btn-primary" style="margin-top:16px;">追加</button>
+  </form>
+  <div style="font-size:12px;color:var(--muted);margin-top:12px;">
+    Discord ID はユーザープロフィールの「ユーザーIDをコピー」から取得できます（開発者モードが必要）。
+  </div>
+</div>
+{% endblock %}

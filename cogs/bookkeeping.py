@@ -301,69 +301,6 @@ class Bookkeeping(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
 
     # -------------------------------------------------------------------------
-    # /仕訳帳
-    # -------------------------------------------------------------------------
-    @app_commands.command(name="仕訳帳", description="仕訳を一覧表示します（日付・科目・件数で絞り込み可）")
-    @app_commands.describe(
-        件数="表示件数（デフォルト: 10、最大: 50）",
-        開始日="絞り込み開始日 YYYY-MM-DD",
-        終了日="絞り込み終了日 YYYY-MM-DD",
-        勘定科目="この科目が借方または貸方の仕訳だけ表示",
-    )
-    @app_commands.autocomplete(勘定科目=_account_autocomplete)
-    async def journal(
-        self,
-        interaction: discord.Interaction,
-        件数: int = 10,
-        開始日: str | None = None,
-        終了日: str | None = None,
-        勘定科目: str | None = None,
-    ):
-        件数 = min(max(件数, 1), 50)
-
-        for d in [開始日, 終了日]:
-            if d:
-                try:
-                    date.fromisoformat(d)
-                except ValueError:
-                    await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
-                    return
-
-        if 開始日 or 終了日 or 勘定科目:
-            entries = await db.get_journal_entries_filtered(開始日, 終了日, 勘定科目, 件数)
-        else:
-            entries = await db.get_journal_entries(件数)
-
-        if not entries:
-            await interaction.response.send_message("該当する仕訳がありません。", ephemeral=True)
-            return
-
-        lines = []
-        for e in entries:
-            event_str = f" 🎸{e['event_tag']}" if e.get("event_tag") else ""
-            lines.append(
-                f"`#{e['id']:04d}` {e['entry_date']}　"
-                f"**{e['debit_account']}** / **{e['credit_account']}**　"
-                f"{fmt_amount(e['amount'])}　{e['description']}{event_str}"
-            )
-
-        filter_desc = []
-        if 開始日:
-            filter_desc.append(f"{開始日}〜")
-        if 終了日:
-            filter_desc.append(f"〜{終了日}")
-        if 勘定科目:
-            filter_desc.append(勘定科目)
-        title_suffix = f"（{' '.join(filter_desc)}）" if filter_desc else f"（直近 {len(entries)} 件）"
-
-        embed = discord.Embed(
-            title=f"📒 仕訳帳{title_suffix}",
-            description=_truncate("\n".join(lines), 4000),
-            color=discord.Color.blue(),
-        )
-        await interaction.response.send_message(embed=embed)
-
-    # -------------------------------------------------------------------------
     # /試算表
     # -------------------------------------------------------------------------
     @app_commands.command(name="試算表", description="残高試算表を表示します")
@@ -1491,113 +1428,11 @@ class Bookkeeping(commands.Cog):
         """コマンド実行者がダッシュボード許可リストに含まれているか確認"""
         return await db.is_allowed_user(discord_user_id)
 
-    @app_commands.command(name="ダッシュボード許可追加", description="指定した Discord ID にダッシュボードの閲覧権限を付与します（許可済みユーザーのみ実行可）")
-    @app_commands.describe(
-        discord_id="追加するユーザーの Discord ID（18桁の数字）",
-        表示名="分かりやすい名前（例: 田中ボーカル）省略可",
-    )
-    async def dashboard_allow_add(
-        self,
-        interaction: discord.Interaction,
-        discord_id: str,
-        表示名: str = "",
-    ):
-        # 実行者が許可済みか確認
-        if not await self._is_dashboard_allowed(str(interaction.user.id)):
-            await interaction.response.send_message(
-                "❌ このコマンドはダッシュボードの閲覧権限を持つユーザーのみ実行できます。",
-                ephemeral=True,
-            )
-            return
-
-        # IDが数字のみかバリデーション
-        if not discord_id.strip().isdigit():
-            await interaction.response.send_message(
-                "❌ Discord ID は数字のみで入力してください（例: `682574338175664404`）。",
-                ephemeral=True,
-            )
-            return
-
-        discord_id = discord_id.strip()
-        name = 表示名 or discord_id
-        added_by = f"{interaction.user.display_name}（{interaction.user.id}）"
-        ok = await db.add_allowed_user(discord_id, name, added_by)
-
-        if ok:
-            embed = discord.Embed(
-                title="✅ ダッシュボード権限を追加しました",
-                color=discord.Color.green(),
-            )
-            embed.add_field(name="Discord ID", value=f"`{discord_id}`", inline=True)
-            embed.add_field(name="表示名", value=name, inline=True)
-            embed.add_field(name="追加者", value=interaction.user.display_name, inline=True)
-            embed.set_footer(text="次回ログイン時から有効になります")
-            await interaction.response.send_message(embed=embed)
-        else:
-            await interaction.response.send_message(
-                f"⚠️ Discord ID `{discord_id}` はすでに許可リストに登録されています。",
-                ephemeral=True,
-            )
-
-    @app_commands.command(name="ダッシュボード許可削除", description="指定した Discord ID のダッシュボード閲覧権限を削除します（許可済みユーザーのみ実行可）")
-    @app_commands.describe(discord_id="削除するユーザーの Discord ID")
-    async def dashboard_allow_remove(
-        self,
-        interaction: discord.Interaction,
-        discord_id: str,
-    ):
-        if not await self._is_dashboard_allowed(str(interaction.user.id)):
-            await interaction.response.send_message(
-                "❌ このコマンドはダッシュボードの閲覧権限を持つユーザーのみ実行できます。",
-                ephemeral=True,
-            )
-            return
-
-        discord_id = discord_id.strip()
-
-        # 自分自身の削除を防止
-        if discord_id == str(interaction.user.id):
-            await interaction.response.send_message(
-                "❌ 自分自身の権限は削除できません。他のメンバーに依頼してください。",
-                ephemeral=True,
-            )
-            return
-
-        ok = await db.remove_allowed_user(discord_id)
-        if ok:
-            await interaction.response.send_message(
-                f"✅ Discord ID `{discord_id}` のダッシュボード権限を削除しました。",
-            )
-        else:
-            await interaction.response.send_message(
-                f"❌ Discord ID `{discord_id}` は許可リストに見つかりません。",
-                ephemeral=True,
-            )
-
-    @app_commands.command(name="ダッシュボード許可一覧", description="ダッシュボードの閲覧権限を持つユーザー一覧を表示します")
-    async def dashboard_allow_list(self, interaction: discord.Interaction):
-        users = await db.get_allowed_users()
-        if not users:
-            await interaction.response.send_message("許可ユーザーが登録されていません。", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"🔑 ダッシュボード閲覧権限一覧（{len(users)} 名）",
-            color=discord.Color.blurple(),
-        )
-        lines = []
-        for u in users:
-            name = u["display_name"] or u["discord_user_id"]
-            added = u["added_by"] or "不明"
-            lines.append(f"`{u['discord_user_id']}` **{name}** — 追加者: {added}（{u['added_at'][:10]}）")
-        embed.description = "\n".join(lines)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
     @app_commands.command(name="ダッシュボード", description="会計ダッシュボードのURLを表示します（許可ユーザーのみ）")
     async def show_dashboard(self, interaction: discord.Interaction):
         if not await self._is_dashboard_allowed(str(interaction.user.id)):
             await interaction.response.send_message(
-                "❌ 閲覧権限がありません。`/ダッシュボード許可追加` で権限を付与してもらってください。",
+                "❌ 閲覧権限がありません。ダッシュボードの許可管理ページで権限を付与してもらってください。",
                 ephemeral=True,
             )
             return
@@ -1609,50 +1444,10 @@ class Bookkeeping(commands.Cog):
             return
         embed = discord.Embed(
             title="📊 会計ダッシュボード",
-            description=f"[ダッシュボードを開く]({DASHBOARD_URL})",
+            description=f"[ダッシュボードを開く]({DASHBOARD_URL})\n\n許可管理はダッシュボードの「許可管理」ページから行えます。",
             color=discord.Color.blurple(),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    # =========================================================================
-    # デモデータ投入
-    # =========================================================================
-
-    @app_commands.command(name="デモデータ投入", description="各機能を試せるサンプルデータを一括投入します（開発・デモ用）")
-    async def seed_demo(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        summary = await db.seed_demo_data()
-
-        embed = discord.Embed(
-            title="🎸 デモデータを投入しました",
-            color=discord.Color.green(),
-            description="以下のサンプルデータが追加されました。各コマンドで動作を確認できます。",
-        )
-        embed.add_field(
-            name="イベント",
-            value="\n".join(f"・{e}" for e in summary["events"]) or "（追加なし・重複）",
-            inline=False,
-        )
-        embed.add_field(
-            name="メンバー",
-            value="\n".join(f"・{m}" for m in summary["members"]) or "（追加なし・重複）",
-            inline=False,
-        )
-        embed.add_field(
-            name="グッズ",
-            value="\n".join(f"・{g}" for g in summary["goods"]) or "（追加なし・重複）",
-            inline=False,
-        )
-        embed.add_field(name="仕訳件数", value=f"{summary['journal_entries']} 件", inline=True)
-        embed.add_field(
-            name="確認コマンド",
-            value=(
-                "`/仕訳帳` `/ライブ収支` `/グッズ在庫` `/グッズ履歴`\n"
-                "`/消費税サマリー` `/確定申告サマリー` `/損益計算書`"
-            ),
-            inline=False,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
