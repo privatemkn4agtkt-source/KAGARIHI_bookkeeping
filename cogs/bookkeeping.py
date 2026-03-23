@@ -403,50 +403,6 @@ class Bookkeeping(commands.Cog):
         embed.add_field(name="負債・資本合計", value=fmt_amount(total_liab + total_equity), inline=True)
         await interaction.response.send_message(embed=embed)
 
-    # -------------------------------------------------------------------------
-    # /総勘定元帳
-    # -------------------------------------------------------------------------
-    @app_commands.command(name="総勘定元帳", description="指定した勘定科目の元帳（全取引・累積残高）を表示します")
-    @app_commands.describe(勘定科目="表示する勘定科目名")
-    @app_commands.autocomplete(勘定科目=_account_autocomplete)
-    async def general_ledger(self, interaction: discord.Interaction, 勘定科目: str):
-        if not await db.account_exists(勘定科目):
-            await interaction.response.send_message(f"勘定科目「{勘定科目}」は登録されていません。", ephemeral=True)
-            return
-
-        entries = await db.get_general_ledger(勘定科目)
-        if not entries:
-            await interaction.response.send_message(f"「{勘定科目}」の仕訳がまだありません。", ephemeral=True)
-            return
-
-        acc_type = entries[0]["account_type"]
-        balance_side = "借方" if acc_type in ("資産", "費用") else "貸方"
-
-        lines = []
-        for e in entries:
-            debit_str  = fmt_amount(e["debit"])  if e["debit"]  else "　　　　"
-            credit_str = fmt_amount(e["credit"]) if e["credit"] else "　　　　"
-            lines.append(
-                f"`{e['entry_date']}` {e['counterpart']}\n"
-                f"　借方: {debit_str}　貸方: {credit_str}　残高: {fmt_amount(e['balance'])}\n"
-                f"　摘要: {e['description']}"
-            )
-
-        CHUNK = 10
-        total = len(entries)
-        shown = lines[:CHUNK]
-
-        embed = discord.Embed(
-            title=f"📖 総勘定元帳 ／ {勘定科目}（{acc_type}・{balance_side}残）",
-            description=_truncate("\n".join(shown), 4000),
-            color=discord.Color.dark_gold(),
-        )
-        if total > CHUNK:
-            embed.set_footer(text=f"全 {total} 件中 最初の {CHUNK} 件を表示")
-        else:
-            embed.set_footer(text=f"全 {total} 件　期末残高: {fmt_amount(entries[-1]['balance'])}")
-        await interaction.response.send_message(embed=embed)
-
     # =========================================================================
     # キャッシュフロー計算書
     # =========================================================================
@@ -587,41 +543,6 @@ class Bookkeeping(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     # =========================================================================
-    # 月次収支
-    # =========================================================================
-
-    @app_commands.command(name="月次収支", description="指定月の収支サマリーを表示します")
-    @app_commands.describe(年月="対象年月 YYYY-MM（省略時: 今月）")
-    async def monthly_summary(self, interaction: discord.Interaction, 年月: str | None = None):
-        year_month = 年月 or str(date.today())[:7]
-        try:
-            date.fromisoformat(year_month + "-01")
-        except ValueError:
-            await interaction.response.send_message("年月は YYYY-MM 形式で入力してください。", ephemeral=True)
-            return
-
-        summary = await db.get_monthly_summary(year_month)
-
-        embed = discord.Embed(
-            title=f"📅 月次収支: {year_month}",
-            color=discord.Color.green() if summary["net"] >= 0 else discord.Color.red(),
-        )
-        rev_lines = [f"　{k}: {fmt_amount(v)}" for k, v in summary["revenues"].items()] or ["　（なし）"]
-        exp_lines = [f"　{k}: {fmt_amount(v)}" for k, v in summary["expenses"].items()] or ["　（なし）"]
-
-        embed.add_field(name="【収益】", value=_truncate("\n".join(rev_lines)), inline=False)
-        embed.add_field(name="収益合計", value=fmt_amount(summary["total_revenue"]), inline=True)
-        embed.add_field(name="【費用】", value=_truncate("\n".join(exp_lines)), inline=False)
-        embed.add_field(name="費用合計", value=fmt_amount(summary["total_expense"]), inline=True)
-        net = summary["net"]
-        embed.add_field(
-            name="当月純利益" if net >= 0 else "当月純損失",
-            value=fmt_amount(abs(net)),
-            inline=False,
-        )
-        await interaction.response.send_message(embed=embed)
-
-    # =========================================================================
     # 予算
     # =========================================================================
 
@@ -672,42 +593,6 @@ class Bookkeeping(commands.Cog):
             color=discord.Color.purple(),
         )
         embed.set_footer(text="🟢 80%未満 🟡 80%以上 🔴 予算超過")
-        await interaction.response.send_message(embed=embed)
-
-    # =========================================================================
-    # メンバー管理
-    # =========================================================================
-
-    @app_commands.command(name="メンバー追加", description="バンドメンバーを追加します")
-    @app_commands.describe(名前="メンバー名")
-    async def add_member(self, interaction: discord.Interaction, 名前: str):
-        success = await db.add_member(名前)
-        if success:
-            await interaction.response.send_message(f"✅ メンバー「{名前}」を追加しました。", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"❌ 「{名前}」はすでに登録されています。", ephemeral=True)
-
-    @app_commands.command(name="メンバー削除", description="バンドメンバーを削除します")
-    @app_commands.describe(名前="削除するメンバー名")
-    @app_commands.autocomplete(名前=_member_autocomplete)
-    async def delete_member(self, interaction: discord.Interaction, 名前: str):
-        success, warning = await db.delete_member(名前)
-        if success:
-            msg = f"✅ メンバー「{名前}」を削除しました。{warning}"
-            await interaction.response.send_message(msg, ephemeral=True)
-        else:
-            await interaction.response.send_message(f"❌ {warning}", ephemeral=True)
-
-    @app_commands.command(name="メンバー一覧", description="バンドメンバーを一覧表示します")
-    async def list_members(self, interaction: discord.Interaction):
-        members = await db.get_members()
-        if not members:
-            await interaction.response.send_message(
-                "メンバーがまだ登録されていません。`/メンバー追加` で追加してください。", ephemeral=True
-            )
-            return
-        embed = discord.Embed(title="👥 メンバー一覧", color=discord.Color.teal())
-        embed.description = "\n".join(f"　{m}" for m in members)
         await interaction.response.send_message(embed=embed)
 
     # =========================================================================
@@ -824,44 +709,6 @@ class Bookkeeping(commands.Cog):
     # =========================================================================
     # 勘定科目管理
     # =========================================================================
-
-    @app_commands.command(name="年次集計", description="指定年の月別収支を一覧表示します")
-    @app_commands.describe(年="対象年 YYYY（省略時: 今年）")
-    async def yearly_summary(self, interaction: discord.Interaction, 年: str | None = None):
-        year = 年 or str(date.today().year)
-        if not year.isdigit() or len(year) != 4:
-            await interaction.response.send_message("年は YYYY 形式で入力してください。", ephemeral=True)
-            return
-
-        rows = await db.get_yearly_summary(year)
-        total_rev = sum(r["revenue"] for r in rows)
-        total_exp = sum(r["expense"] for r in rows)
-
-        lines = []
-        for r in rows:
-            if r["revenue"] == 0 and r["expense"] == 0:
-                continue
-            sign = "+" if r["net"] >= 0 else ""
-            lines.append(
-                f"`{r['month']}` 収益 {fmt_amount(r['revenue'])}　費用 {fmt_amount(r['expense'])}　"
-                f"**{sign}{fmt_amount(r['net'])}**"
-            )
-
-        if not lines:
-            await interaction.response.send_message(f"{year} 年の仕訳がありません。", ephemeral=True)
-            return
-
-        net = total_rev - total_exp
-        embed = discord.Embed(
-            title=f"📅 {year}年 年次集計",
-            description=_truncate("\n".join(lines), 4000),
-            color=discord.Color.green() if net >= 0 else discord.Color.red(),
-        )
-        embed.add_field(name="年間収益合計", value=fmt_amount(total_rev), inline=True)
-        embed.add_field(name="年間費用合計", value=fmt_amount(total_exp), inline=True)
-        sign = "+" if net >= 0 else ""
-        embed.add_field(name="年間純利益" if net >= 0 else "年間純損失", value=f"**{sign}{fmt_amount(net)}**", inline=True)
-        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="勘定科目一覧", description="登録されている勘定科目を一覧表示します")
     async def list_accounts(self, interaction: discord.Interaction):
