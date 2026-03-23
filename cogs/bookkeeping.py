@@ -339,38 +339,6 @@ class Bookkeeping(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     # -------------------------------------------------------------------------
-    # /損益計算書
-    # -------------------------------------------------------------------------
-    @app_commands.command(name="損益計算書", description="損益計算書（PL）を表示します")
-    async def income_statement(self, interaction: discord.Interaction):
-        rows = await db.get_trial_balance()
-
-        revenues = [r for r in rows if r["account_type"] == "収益"]
-        expenses = [r for r in rows if r["account_type"] == "費用"]
-
-        total_rev = sum(r["balance"] for r in revenues)
-        total_exp = sum(r["balance"] for r in expenses)
-        net = total_rev - total_exp
-
-        embed = discord.Embed(
-            title="📈 損益計算書",
-            color=discord.Color.green() if net >= 0 else discord.Color.red(),
-        )
-        rev_lines = [f"　{r['name']}: {fmt_amount(r['balance'])}" for r in revenues] or ["　（なし）"]
-        exp_lines = [f"　{r['name']}: {fmt_amount(r['balance'])}" for r in expenses] or ["　（なし）"]
-
-        embed.add_field(name="【収益】", value=_truncate("\n".join(rev_lines)), inline=False)
-        embed.add_field(name="収益合計", value=fmt_amount(total_rev), inline=True)
-        embed.add_field(name="【費用】", value=_truncate("\n".join(exp_lines)), inline=False)
-        embed.add_field(name="費用合計", value=fmt_amount(total_exp), inline=True)
-        embed.add_field(
-            name="当期純利益" if net >= 0 else "当期純損失",
-            value=fmt_amount(abs(net)),
-            inline=False,
-        )
-        await interaction.response.send_message(embed=embed)
-
-    # -------------------------------------------------------------------------
     # /貸借対照表
     # -------------------------------------------------------------------------
     @app_commands.command(name="貸借対照表", description="貸借対照表（BS）を表示します")
