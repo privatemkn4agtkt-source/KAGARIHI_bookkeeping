@@ -65,9 +65,18 @@ NAV_SECTIONS = [
     {
         "label": "財務諸表",
         "items": [
-            {"path": "/pl",    "icon": "📊", "label": "損益計算書"},
-            {"path": "/bs",    "icon": "🏦", "label": "貸借対照表"},
-            {"path": "/trial", "icon": "📋", "label": "試算表"},
+            {"path": "/pl",     "icon": "📊", "label": "損益計算書"},
+            {"path": "/bs",     "icon": "🏦", "label": "貸借対照表"},
+            {"path": "/trial",  "icon": "📋", "label": "試算表"},
+            {"path": "/ledger", "icon": "📖", "label": "総勘定元帳"},
+            {"path": "/budget", "icon": "🎯", "label": "予算実績対比"},
+        ],
+    },
+    {
+        "label": "集計",
+        "items": [
+            {"path": "/monthly", "icon": "📅", "label": "月次収支"},
+            {"path": "/yearly",  "icon": "📆", "label": "年次集計"},
         ],
     },
     {
@@ -88,6 +97,7 @@ NAV_SECTIONS = [
     {
         "label": "管理",
         "items": [
+            {"path": "/members",     "icon": "👥", "label": "メンバー管理"},
             {"path": "/permissions", "icon": "🔑", "label": "許可管理"},
         ],
     },
@@ -427,10 +437,12 @@ async def tax_page(request: Request, period: str = Query(default=None), user: di
     await db.record_page_visit("/tax")
     if period is None:
         period = str(date.today().year)
+    storage = await db.get_storage_info()
     return templates.TemplateResponse("tax.html", {
         "request": request, "user": user,
         "result": await db.get_tax_summary(period),
         "period": period, "fmt": fmt,
+        "storage": storage,
         "nav_sections": await sorted_nav_sections(),
     })
 
@@ -498,6 +510,134 @@ async def permissions_remove(
     if success:
         return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+を削除しました&ok=1", status_code=303)
     return RedirectResponse(f"/permissions?msg=Discord+ID+{discord_id}+が見つかりません&ok=0", status_code=303)
+
+
+@app.get("/members", response_class=HTMLResponse)
+async def members_page(
+    request: Request,
+    msg: str = Query(default=None),
+    ok: int = Query(default=1),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/members")
+    members = await db.get_members()
+    unsettled_advances = await db.get_advances(settled=False)
+    advance_totals: dict[str, int] = {}
+    for a in unsettled_advances:
+        advance_totals[a["paid_by"]] = advance_totals.get(a["paid_by"], 0) + a["amount"]
+    return templates.TemplateResponse("members.html", {
+        "request": request, "user": user,
+        "members": members,
+        "advance_totals": advance_totals,
+        "message": msg,
+        "message_ok": ok == 1,
+        "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.post("/members/add")
+async def members_add(
+    request: Request,
+    name: str = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/members?msg=名前を入力してください&ok=0", status_code=303)
+    success = await db.add_member(name)
+    if success:
+        return RedirectResponse(f"/members?msg={name}+を追加しました&ok=1", status_code=303)
+    return RedirectResponse(f"/members?msg={name}+はすでに登録されています&ok=0", status_code=303)
+
+
+@app.post("/members/remove")
+async def members_remove(
+    request: Request,
+    name: str = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    name = name.strip()
+    success, warning = await db.delete_member(name)
+    if success:
+        msg = f"{name}+を削除しました{warning}"
+        return RedirectResponse(f"/members?msg={msg}&ok=1", status_code=303)
+    return RedirectResponse(f"/members?msg={name}+が見つかりません&ok=0", status_code=303)
+
+
+@app.get("/monthly", response_class=HTMLResponse)
+async def monthly_page(
+    request: Request,
+    ym: str = Query(default=None),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/monthly")
+    if ym is None:
+        ym = date.today().strftime("%Y-%m")
+    result = await db.get_monthly_summary(ym)
+    return templates.TemplateResponse("monthly.html", {
+        "request": request, "user": user,
+        "result": result, "ym": ym, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.get("/ledger", response_class=HTMLResponse)
+async def ledger_page(
+    request: Request,
+    account: str = Query(default=None),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/ledger")
+    accounts = await db.get_accounts()
+    rows = []
+    if account:
+        rows = await db.get_general_ledger(account)
+    return templates.TemplateResponse("ledger.html", {
+        "request": request, "user": user,
+        "accounts": accounts, "account": account or "",
+        "rows": rows, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.get("/yearly", response_class=HTMLResponse)
+async def yearly_page(
+    request: Request,
+    year: str = Query(default=None),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/yearly")
+    if year is None:
+        year = str(date.today().year)
+    rows = await db.get_yearly_summary(year)
+    total_rev = sum(r["revenue"] for r in rows)
+    total_exp = sum(r["expense"] for r in rows)
+    return templates.TemplateResponse("yearly.html", {
+        "request": request, "user": user,
+        "year": year, "rows": rows,
+        "total_rev": total_rev, "total_exp": total_exp,
+        "net": total_rev - total_exp,
+        "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.get("/budget", response_class=HTMLResponse)
+async def budget_page(
+    request: Request,
+    period: str = Query(default=None),
+    user: dict = Depends(auth_guard),
+):
+    await db.record_page_visit("/budget")
+    if period is None:
+        period = date.today().strftime("%Y-%m")
+    rows = await db.get_budget_vs_actual(period)
+    return templates.TemplateResponse("budget.html", {
+        "request": request, "user": user,
+        "rows": rows, "period": period, "fmt": fmt,
+        "nav_sections": await sorted_nav_sections(),
+    })
 
 
 if __name__ == "__main__":

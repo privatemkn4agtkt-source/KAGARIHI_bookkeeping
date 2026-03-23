@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}月次収支 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📅 月次収支</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>年月（YYYY-MM）</label><input type="month" name="ym" value="{{ ym }}" style="width:150px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">収益合計</div>
+    <div class="card-value green">{{ fmt(result.total_revenue) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">費用合計</div>
+    <div class="card-value red">{{ fmt(result.total_expense) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">当月純利益</div>
+    <div class="card-value {{ 'green' if result.net >= 0 else 'red' }}">{{ fmt(result.net) }}</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <!-- 収益内訳 -->
+  <div class="card">
+    <h2>収益内訳</h2>
+    {% if result.revenues %}
+    <table>
+      <thead><tr><th>勘定科目</th><th class="text-right">金額</th></tr></thead>
+      <tbody>
+        {% for name, amt in result.revenues.items() | sort(attribute='1', reverse=true) %}
+        <tr>
+          <td><span class="badge badge-rev">収益</span> {{ name }}</td>
+          <td class="text-right amount pos">{{ fmt(amt) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row"><td>合計</td><td class="text-right amount pos">{{ fmt(result.total_revenue) }}</td></tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <div style="color:var(--muted);text-align:center;padding:24px;">収益の記録がありません</div>
+    {% endif %}
+  </div>
+
+  <!-- 費用内訳 -->
+  <div class="card">
+    <h2>費用内訳</h2>
+    {% if result.expenses %}
+    <table>
+      <thead><tr><th>勘定科目</th><th class="text-right">金額</th></tr></thead>
+      <tbody>
+        {% for name, amt in result.expenses.items() | sort(attribute='1', reverse=true) %}
+        <tr>
+          <td><span class="badge badge-exp">費用</span> {{ name }}</td>
+          <td class="text-right amount neg">{{ fmt(amt) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row"><td>合計</td><td class="text-right amount neg">{{ fmt(result.total_expense) }}</td></tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <div style="color:var(--muted);text-align:center;padding:24px;">費用の記録がありません</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

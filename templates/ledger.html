@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}総勘定元帳 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📖 総勘定元帳</h1>
+
+<form method="get" class="filter-bar">
+  <div>
+    <label>勘定科目</label>
+    <select name="account" style="width:200px;">
+      <option value="">— 選択してください —</option>
+      {% for a in accounts %}
+      <option value="{{ a.name }}" {% if a.name == account %}selected{% endif %}>{{ a.name }}（{{ a.account_type }}）</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+{% if account %}
+  {% if rows %}
+  <div class="card">
+    <h2>{{ account }} — {{ rows[0].account_type }} — {{ rows|length }} 件</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>日付</th>
+          <th class="text-right">借方</th>
+          <th class="text-right">貸方</th>
+          <th>相手科目</th>
+          <th>摘要</th>
+          <th class="text-right">残高</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td style="color:var(--muted);font-size:12px;">#{{ "%04d"|format(r.id) }}</td>
+          <td style="color:var(--muted);">{{ r.entry_date }}</td>
+          <td class="text-right amount {% if r.debit > 0 %}neutral{% else %}—{% endif %}">
+            {% if r.debit > 0 %}{{ fmt(r.debit) }}{% else %}—{% endif %}
+          </td>
+          <td class="text-right amount {% if r.credit > 0 %}neutral{% else %}—{% endif %}">
+            {% if r.credit > 0 %}{{ fmt(r.credit) }}{% else %}—{% endif %}
+          </td>
+          <td><span class="tag">{{ r.counterpart }}</span></td>
+          <td style="font-size:13px;">{{ r.description }}</td>
+          <td class="text-right amount {{ 'pos' if r.balance >= 0 else 'neg' }}">{{ fmt(r.balance) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="total-row">
+          <td colspan="6">残高</td>
+          <td class="text-right amount {{ 'pos' if rows[-1].balance >= 0 else 'neg' }}">{{ fmt(rows[-1].balance) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <div class="card" style="color:var(--muted);text-align:center;padding:40px;">
+    {{ account }} の仕訳が存在しません。
+  </div>
+  {% endif %}
+{% else %}
+<div class="card" style="color:var(--muted);text-align:center;padding:40px;">
+  勘定科目を選択してください。
+</div>
+{% endif %}
+{% endblock %}

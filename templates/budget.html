@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}予算実績対比 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>🎯 予算実績対比表</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>期間（YYYY-MM または YYYY）</label><input type="text" name="period" value="{{ period }}" placeholder="2025-04" style="width:140px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+{% if rows %}
+<div class="card">
+  <h2>{{ period }} — {{ rows|length }} 科目</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>勘定科目</th>
+        <th>種別</th>
+        <th class="text-right">予算</th>
+        <th class="text-right">実績</th>
+        <th class="text-right">差異</th>
+        <th style="width:150px;">達成率</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><strong>{{ r.account_name }}</strong></td>
+        <td>
+          {% if r.account_type == "収益" %}<span class="badge badge-rev">{{ r.account_type }}</span>
+          {% elif r.account_type == "費用" %}<span class="badge badge-exp">{{ r.account_type }}</span>
+          {% elif r.account_type == "資産" %}<span class="badge badge-asset">{{ r.account_type }}</span>
+          {% elif r.account_type == "負債" %}<span class="badge badge-liab">{{ r.account_type }}</span>
+          {% else %}<span class="badge">{{ r.account_type }}</span>{% endif %}
+        </td>
+        <td class="text-right amount neutral">{{ fmt(r.budget) }}</td>
+        <td class="text-right amount {{ 'pos' if r.actual >= 0 else 'neg' }}">{{ fmt(r.actual) }}</td>
+        <td class="text-right amount {{ 'pos' if r.diff >= 0 else 'neg' }}">{{ fmt(r.diff) }}</td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar-track">
+              <div class="bar-fill {{ 'rev' if r.ratio <= 100 else 'exp' }}"
+                style="width:{{ [r.ratio, 100]|min|round|int }}%;"></div>
+            </div>
+            <span style="font-size:12px;color:var(--muted);min-width:40px;">{{ r.ratio|round(1) }}%</span>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="color:var(--muted);text-align:center;padding:40px;">
+  {{ period }} に予算設定がありません。<br>
+  Discord の /予算設定 コマンドで予算を設定してください。
+</div>
+{% endif %}
+{% endblock %}

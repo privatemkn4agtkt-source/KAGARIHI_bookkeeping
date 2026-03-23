@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}メンバー管理 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>👥 メンバー管理</h1>
+
+{% if message %}
+<div class="card" style="border-color:{{ 'var(--green)' if message_ok else 'var(--red)' }};margin-bottom:16px;padding:14px 20px;">
+  <span style="color:{{ 'var(--green)' if message_ok else 'var(--red)' }};font-weight:600;">
+    {{ '✅' if message_ok else '❌' }} {{ message }}
+  </span>
+</div>
+{% endif %}
+
+<!-- メンバー一覧 -->
+<div class="card">
+  <h2>メンバー一覧（{{ members|length }} 名）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>名前</th>
+        <th class="text-right">未精算立替</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in members %}
+      <tr>
+        <td><strong>{{ m }}</strong></td>
+        <td class="text-right">
+          {% if advance_totals.get(m) %}
+          <span class="amount" style="color:var(--gold);">{{ fmt(advance_totals[m]) }}</span>
+          {% else %}
+          <span style="color:var(--muted);">—</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="/members/remove" style="display:inline;">
+            <input type="hidden" name="name" value="{{ m }}">
+            <button type="submit" class="btn"
+              style="background:var(--surface2);color:var(--red);border:1px solid var(--red);padding:4px 12px;font-size:12px;"
+              onclick="return confirm('{{ m }} を削除しますか？{% if advance_totals.get(m) %}（未精算立替あり）{% endif %}')">削除</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="text-center" style="color:var(--muted);padding:24px;">メンバーが登録されていません</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- メンバー追加 -->
+<div class="card">
+  <h2>メンバーを追加</h2>
+  <form method="post" action="/members/add" class="filter-bar" style="margin-bottom:0;">
+    <div>
+      <label>名前</label>
+      <input type="text" name="name" placeholder="例: 田中ボーカル" style="width:200px;" required>
+    </div>
+    <button type="submit" class="btn btn-primary" style="margin-top:16px;">追加</button>
+  </form>
+</div>
+{% endblock %}

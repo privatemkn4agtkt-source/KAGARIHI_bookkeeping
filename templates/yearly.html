@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}年次集計 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>📆 年次集計</h1>
+
+<form method="get" class="filter-bar">
+  <div><label>年（YYYY）</label><input type="number" name="year" value="{{ year }}" min="2000" max="2099" style="width:100px;"></div>
+  <button class="btn btn-primary" type="submit">表示</button>
+</form>
+
+<div class="grid grid-3" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="card-title">年間収益</div>
+    <div class="card-value green">{{ fmt(total_rev) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">年間費用</div>
+    <div class="card-value red">{{ fmt(total_exp) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">年間純利益</div>
+    <div class="card-value {{ 'green' if net >= 0 else 'red' }}">{{ fmt(net) }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>{{ year }}年 月別推移</h2>
+  {% set max_val = rows | map(attribute='revenue') | list + rows | map(attribute='expense') | list %}
+  <table>
+    <thead>
+      <tr>
+        <th>月</th>
+        <th class="text-right">収益</th>
+        <th class="text-right">費用</th>
+        <th class="text-right">純利益</th>
+        <th style="width:200px;">収支バー</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(max_v=1) %}
+      {% for r in rows %}
+        {% if r.revenue > ns.max_v %}{% set ns.max_v = r.revenue %}{% endif %}
+        {% if r.expense > ns.max_v %}{% set ns.max_v = r.expense %}{% endif %}
+      {% endfor %}
+      {% for r in rows %}
+      <tr>
+        <td><strong>{{ r.month[5:7] }}月</strong></td>
+        <td class="text-right amount pos">{% if r.revenue > 0 %}{{ fmt(r.revenue) }}{% else %}<span style="color:var(--muted);">—</span>{% endif %}</td>
+        <td class="text-right amount neg">{% if r.expense > 0 %}{{ fmt(r.expense) }}{% else %}<span style="color:var(--muted);">—</span>{% endif %}</td>
+        <td class="text-right amount {{ 'pos' if r.net >= 0 else 'neg' }}">{{ fmt(r.net) }}</td>
+        <td>
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            {% if r.revenue > 0 %}
+            <div class="bar-track"><div class="bar-fill rev" style="width:{{ (r.revenue / ns.max_v * 100)|round|int }}%;"></div></div>
+            {% endif %}
+            {% if r.expense > 0 %}
+            <div class="bar-track"><div class="bar-fill exp" style="width:{{ (r.expense / ns.max_v * 100)|round|int }}%;"></div></div>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td>合計</td>
+        <td class="text-right amount pos">{{ fmt(total_rev) }}</td>
+        <td class="text-right amount neg">{{ fmt(total_exp) }}</td>
+        <td class="text-right amount {{ 'pos' if net >= 0 else 'neg' }}">{{ fmt(net) }}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endblock %}
