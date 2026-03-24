@@ -42,8 +42,25 @@ sed -i "s|DISCORD_REDIRECT_URI=.*|DISCORD_REDIRECT_URI=${URL}/auth/callback|" "$
 sed -i "s|DASHBOARD_URL=.*|DASHBOARD_URL=${URL}|" "$ENV_FILE"
 
 echo "[tunnel] .env 更新完了"
-echo "[tunnel] ⚠️  Discord Developer Portal の OAuth2 Redirect URI も手動で更新してください:"
-echo "[tunnel]    ${URL}/auth/callback"
+
+# Discord Developer Portal の OAuth2 Redirect URI を自動更新
+DISCORD_TOKEN=$(grep -oP '(?<=^DISCORD_TOKEN=).+' "$ENV_FILE" || true)
+if [ -n "$DISCORD_TOKEN" ]; then
+    echo "[tunnel] Discord OAuth2 Redirect URI を更新します..."
+    RESPONSE=$(curl -s -o /tmp/discord-patch.json -w "%{http_code}" \
+        -X PATCH "https://discord.com/api/v10/applications/@me" \
+        -H "Authorization: Bot ${DISCORD_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"redirect_uris\": [\"${URL}/auth/callback\", \"http://localhost:8000/auth/callback\"]}")
+    if [ "$RESPONSE" = "200" ]; then
+        echo "[tunnel] Discord Redirect URI 更新成功: ${URL}/auth/callback"
+    else
+        echo "[tunnel] WARNING: Discord Redirect URI 更新失敗 (HTTP ${RESPONSE})"
+        cat /tmp/discord-patch.json || true
+    fi
+else
+    echo "[tunnel] WARNING: DISCORD_TOKEN が取得できませんでした。Portal を手動更新してください。"
+fi
 
 # ダッシュボードを再起動して新しい URL を反映
 systemctl restart bookkeeping-dashboard 2>/dev/null || true
