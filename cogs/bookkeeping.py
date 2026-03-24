@@ -913,5 +913,104 @@ class Bookkeeping(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
+    @app_commands.command(name="ダミーデータ削除", description="ダミーデータ挿入で追加したデータを一括削除します（開発・テスト用）")
+    async def delete_dummy_data(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        import aiosqlite
+
+        DUMMY_EVENTS = ["春ライブ2025", "夏コミ2025", "秋ワンマン2025", "冬フェス2025"]
+        DUMMY_MEMBERS = ["田中花子", "鈴木一郎", "佐藤めぐみ", "山田けんじ"]
+        DUMMY_GOODS = ["缶バッジセット", "アクリルキーホルダー", "Tシャツ", "クリアファイル"]
+        DUMMY_DESCRIPTIONS = [
+            "4月定期公演チケット売上", "4月Fanbox収入", "会場下見交通費",
+            "リハーサルスタジオ代", "ライブ会場レンタル", "グッズ物販売上",
+            "缶バッジ仕入", "缶バッジ代金支払い", "SNS広告費",
+            "マイクスタンド購入", "Spotify等ストリーミング収益",
+            "ミニアルバム録音費", "MV制作費", "録音・MV制作費支払い",
+            "フェス出演料", "遠征交通費", "配信ツール月額",
+            "携帯通信費", "文房具・雑費", "Booth同人誌売上",
+        ]
+        DUMMY_ADVANCE_DESCS = [
+            "会場下見の電車代", "スタジオ延長代 立替",
+            "衣装クリーニング代", "印刷費（セットリスト）",
+        ]
+        DUMMY_BUDGET_ACCOUNTS = [
+            "旅費交通費", "スタジオレンタル代", "宣伝広告費",
+            "消耗品費", "配信サービス費", "機材費",
+        ]
+
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            # 仕訳削除
+            placeholders = ",".join("?" * len(DUMMY_DESCRIPTIONS))
+            cur = await conn.execute(
+                f"DELETE FROM journal_entries WHERE description IN ({placeholders})",
+                DUMMY_DESCRIPTIONS,
+            )
+            deleted_journals = cur.rowcount
+
+            # グッズ取引削除
+            placeholders = ",".join("?" * len(DUMMY_GOODS))
+            await conn.execute(
+                f"DELETE FROM goods_transactions WHERE goods_name IN ({placeholders})",
+                DUMMY_GOODS,
+            )
+
+            # グッズ削除
+            cur = await conn.execute(
+                f"DELETE FROM goods WHERE name IN ({placeholders})",
+                DUMMY_GOODS,
+            )
+            deleted_goods = cur.rowcount
+
+            # 立替削除
+            placeholders = ",".join("?" * len(DUMMY_ADVANCE_DESCS))
+            cur = await conn.execute(
+                f"DELETE FROM advances WHERE description IN ({placeholders})",
+                DUMMY_ADVANCE_DESCS,
+            )
+            deleted_advances = cur.rowcount
+
+            # イベント削除
+            placeholders = ",".join("?" * len(DUMMY_EVENTS))
+            cur = await conn.execute(
+                f"DELETE FROM events WHERE name IN ({placeholders})",
+                DUMMY_EVENTS,
+            )
+            deleted_events = cur.rowcount
+
+            # メンバー削除
+            placeholders = ",".join("?" * len(DUMMY_MEMBERS))
+            cur = await conn.execute(
+                f"DELETE FROM members WHERE name IN ({placeholders})",
+                DUMMY_MEMBERS,
+            )
+            deleted_members = cur.rowcount
+
+            # 予算削除（当月分のみ）
+            from datetime import date as _date
+            period = _date.today().strftime("%Y-%m")
+            placeholders = ",".join("?" * len(DUMMY_BUDGET_ACCOUNTS))
+            cur = await conn.execute(
+                f"DELETE FROM budgets WHERE period = ? AND account_name IN ({placeholders})",
+                [period, *DUMMY_BUDGET_ACCOUNTS],
+            )
+            deleted_budgets = cur.rowcount
+
+            await conn.commit()
+
+        embed = discord.Embed(
+            title="🗑️ ダミーデータ削除完了",
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="イベント", value=f"{deleted_events} 件", inline=True)
+        embed.add_field(name="メンバー", value=f"{deleted_members} 件", inline=True)
+        embed.add_field(name="仕訳", value=f"{deleted_journals} 件", inline=True)
+        embed.add_field(name="立替", value=f"{deleted_advances} 件", inline=True)
+        embed.add_field(name="グッズ", value=f"{deleted_goods} 件", inline=True)
+        embed.add_field(name="予算", value=f"{deleted_budgets} 件", inline=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Bookkeeping(bot))
