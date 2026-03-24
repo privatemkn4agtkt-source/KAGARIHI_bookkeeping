@@ -315,6 +315,7 @@ async def index(request: Request, user: dict = Depends(auth_guard), saved: str =
         "advance_totals": sorted(advance_totals.items(), key=lambda x: -x[1]),
         "tax_balances": tax_balances,
         "accounts": accounts,
+        "events": events,
         "today": today.isoformat(),
         "saved": saved,
         "fmt": fmt,

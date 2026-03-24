@@ -59,8 +59,11 @@
       </div>
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">イベントタグ</label>
-        <input type="text" name="event_tag" placeholder="例: 2024春ライブ（任意）"
+        <select name="event_tag"
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+          <option value="">なし</option>
+          {% for e in events %}<option value="{{ e }}">🎸 {{ e }}</option>{% endfor %}
+        </select>
       </div>
       <div>
         <button type="submit" class="btn btn-primary" style="padding:8px 24px;white-space:nowrap;">登録する</button>
