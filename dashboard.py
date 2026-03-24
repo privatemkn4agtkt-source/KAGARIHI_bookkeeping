@@ -714,4 +714,4 @@ async def accounts_page(request: Request, user: dict = Depends(auth_guard)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("dashboard:app", host="0.0.0.0", port=DASHBOARD_PORT, reload=False)
+    uvicorn.run("dashboard:app", host="0.0.0.0", port=DASHBOARD_PORT, reload=False, proxy_headers=True, forwarded_allow_ips="*")
