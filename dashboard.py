@@ -754,6 +754,214 @@ async def export_excel(request: Request, user: dict = Depends(auth_guard)):
     wb = Workbook()
     wb.remove(wb.active)
 
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    year_str  = datetime.now().strftime("%Y")
+
+    # ── 財務諸表データを事前取得（既存DBモジュールを再利用） ─────
+    tb_rows   = await db.get_trial_balance()
+    yearly    = await db.get_yearly_summary(year_str)
+    cf        = await db.get_cash_flow(year_str)
+
+    # ── 財務諸表シート共通スタイル補助関数 ──────────────────────
+    def _fill(c): return PatternFill("solid", fgColor=c)
+    def _border():
+        s = Side(style="thin", color="BDBDBD")
+        return Border(left=s, right=s, top=s, bottom=s)
+    def _thick_bottom():
+        thin = Side(style="thin",   color="BDBDBD")
+        thk  = Side(style="medium", color="1F3864")
+        return Border(left=thin, right=thin, top=thin, bottom=thk)
+    F_HEAD  = Font(name="Meiryo UI", bold=True, color="FFFFFF", size=10)
+    F_TITLE = Font(name="Meiryo UI", bold=True, size=10)
+    F_BODY  = Font(name="Meiryo UI", size=9)
+    F_TOTAL = Font(name="Meiryo UI", bold=True, size=9)
+    A_C = Alignment(horizontal="center", vertical="center")
+    A_L = Alignment(horizontal="left",   vertical="center")
+    A_R = Alignment(horizontal="right",  vertical="center")
+
+    def write_headers(ws, headers):
+        for col, (label, width) in enumerate(headers, 1):
+            c = ws.cell(row=1, column=col, value=label)
+            c.font = F_HEAD; c.fill = _fill("1F3864")
+            c.alignment = A_C; c.border = _border()
+            ws.column_dimensions[get_column_letter(col)].width = width
+
+    def style(ws, row, col, val, *, num=False, center=False, fill_color=None, bold=False, thick_bottom=False):
+        c = ws.cell(row=row, column=col, value=val)
+        c.font = F_TOTAL if bold else F_BODY
+        c.border = _thick_bottom() if thick_bottom else _border()
+        if fill_color: c.fill = _fill(fill_color)
+        if num:    c.number_format = '#,##0'; c.alignment = A_R
+        elif center: c.alignment = A_C
+        else:        c.alignment = A_L
+
+    def section_title(ws, row, text, n_cols):
+        """セクション見出し行（濃紺背景）"""
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols)
+        c = ws.cell(row=row, column=1, value=text)
+        c.font = F_HEAD; c.fill = _fill("1F3864"); c.alignment = A_L; c.border = _border()
+
+    def total_row(ws, row, label, amount, n_cols, fc="D6E4F0"):
+        """合計行（薄青背景・太字）"""
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=n_cols-1)
+        c = ws.cell(row=row, column=1, value=label)
+        c.font = F_TOTAL; c.fill = _fill(fc); c.alignment = A_L; c.border = _border()
+        c = ws.cell(row=row, column=n_cols, value=amount)
+        c.font = F_TOTAL; c.fill = _fill(fc); c.number_format = '#,##0'; c.alignment = A_R; c.border = _border()
+
+    # ── ① 損益計算書 ────────────────────────────────────────────
+    ws = wb.create_sheet("損益計算書")
+    ws.freeze_panes = "A3"
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 16
+    ws.merge_cells("A1:B1")
+    c = ws.cell(row=1, column=1, value=f"損益計算書　{year_str}年度　（出力日：{today_str}）")
+    c.font = Font(name="Meiryo UI", bold=True, size=12); c.alignment = A_L
+
+    assets   = [r for r in tb_rows if r["account_type"] == "資産"]
+    liabs    = [r for r in tb_rows if r["account_type"] == "負債"]
+    equity   = [r for r in tb_rows if r["account_type"] == "資本"]
+    revenues = [r for r in tb_rows if r["account_type"] == "収益"]
+    expenses = [r for r in tb_rows if r["account_type"] == "費用"]
+    total_rev = sum(r["balance"] for r in revenues)
+    total_exp = sum(r["balance"] for r in expenses)
+    net_income = total_rev - total_exp
+
+    r = 2
+    section_title(ws, r, "【収益】", 2); r += 1
+    for row in sorted(revenues, key=lambda x: -x["balance"]):
+        style(ws, r, 1, row["name"], fill_color="E8F5E9")
+        style(ws, r, 2, row["balance"], num=True, fill_color="E8F5E9"); r += 1
+    total_row(ws, r, "収益合計", total_rev, 2, "C8E6C9"); r += 1
+    r += 1
+    section_title(ws, r, "【費用】", 2); r += 1
+    for row in sorted(expenses, key=lambda x: -x["balance"]):
+        style(ws, r, 1, row["name"], fill_color="FFF3E0")
+        style(ws, r, 2, row["balance"], num=True, fill_color="FFF3E0"); r += 1
+    total_row(ws, r, "費用合計", total_exp, 2, "FFE0B2"); r += 1
+    r += 1
+    fc_net = "C8E6C9" if net_income >= 0 else "FFCDD2"
+    total_row(ws, r, "当期純利益（損失）", net_income, 2, fc_net)
+
+    # ── ② 貸借対照表 ────────────────────────────────────────────
+    ws = wb.create_sheet("貸借対照表")
+    ws.freeze_panes = "A3"
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 28
+    ws.column_dimensions["D"].width = 16
+    ws.merge_cells("A1:D1")
+    c = ws.cell(row=1, column=1, value=f"貸借対照表　{today_str} 現在")
+    c.font = Font(name="Meiryo UI", bold=True, size=12); c.alignment = A_L
+
+    total_asset  = sum(r["balance"] for r in assets)
+    total_liab   = sum(r["balance"] for r in liabs)
+    total_equity = sum(r["balance"] for r in equity) + net_income
+
+    # 左列: 資産、右列: 負債＋資本 を同じ行に並べる
+    left  = [("【資産】", None, "E3F2FD")] + [(r["name"], r["balance"], "E3F2FD") for r in assets] \
+           + [("資産合計", total_asset, "BBDEFB")]
+    right = [("【負債】", None, "FCE4EC")] + [(r["name"], r["balance"], "FCE4EC") for r in liabs] \
+           + [("負債合計", total_liab, "FFCDD2")] \
+           + [("【資本】", None, "F3E5F5")] + [(r["name"], r["balance"], "F3E5F5") for r in equity] \
+           + [("当期純利益", net_income, "F3E5F5")] \
+           + [("負債・資本合計", total_equity + total_liab, "CE93D8")]
+
+    for i, ((lname, lval, lfc), (rname, rval, rfc)) in enumerate(
+        zip(left + [("", None, None)] * max(0, len(right)-len(left)),
+            right + [("", None, None)] * max(0, len(left)-len(right))), 2):
+        def _bs(col, name, val, fc):
+            if name is None: return
+            is_header = name.startswith("【") or name.endswith("合計") or name in ("当期純利益",)
+            c1 = ws.cell(row=i, column=col, value=name)
+            c1.font = F_TOTAL if is_header else F_BODY
+            if fc: c1.fill = _fill(fc)
+            c1.alignment = A_L; c1.border = _border()
+            c2 = ws.cell(row=i, column=col+1, value=val)
+            c2.font = F_TOTAL if is_header else F_BODY
+            if fc: c2.fill = _fill(fc)
+            if val is not None: c2.number_format = '#,##0'; c2.alignment = A_R
+            c2.border = _border()
+        _bs(1, lname, lval, lfc)
+        _bs(3, rname, rval, rfc)
+
+    # ── ③ 試算表 ────────────────────────────────────────────────
+    ws = wb.create_sheet("試算表")
+    ws.freeze_panes = "A3"
+    ws.merge_cells("A1:E1")
+    c = ws.cell(row=1, column=1, value=f"試算表　（出力日：{today_str}）")
+    c.font = Font(name="Meiryo UI", bold=True, size=12); c.alignment = A_L
+    write_headers(ws, [("勘定科目",20),("種別",10),("借方合計",14),("貸方合計",14),("残高",14)])
+    type_colors = {"資産":"E3F2FD","負債":"FCE4EC","資本":"F3E5F5","収益":"E8F5E9","費用":"FFF3E0"}
+    for r, row in enumerate(tb_rows, 3):
+        fc = type_colors.get(row["account_type"])
+        style(ws, r, 1, row["name"],         fill_color=fc)
+        style(ws, r, 2, row["account_type"], center=True, fill_color=fc)
+        style(ws, r, 3, row["debit_total"],  num=True,    fill_color=fc)
+        style(ws, r, 4, row["credit_total"], num=True,    fill_color=fc)
+        style(ws, r, 5, row["balance"],      num=True,    fill_color=fc)
+    tr = len(tb_rows) + 3
+    total_row(ws, tr, "合計", sum(r["debit_total"] for r in tb_rows), 3, "D6E4F0")
+    style(ws, tr, 4, sum(r["credit_total"] for r in tb_rows), num=True, fill_color="D6E4F0", bold=True)
+    style(ws, tr, 5, None, fill_color="D6E4F0")
+
+    # ── ④ キャッシュフロー計算書 ────────────────────────────────
+    ws = wb.create_sheet("キャッシュフロー")
+    ws.freeze_panes = "A3"
+    ws.column_dimensions["A"].width = 30; ws.column_dimensions["B"].width = 16
+    ws.merge_cells("A1:B1")
+    c = ws.cell(row=1, column=1, value=f"キャッシュフロー計算書　{year_str}年度　（出力日：{today_str}）")
+    c.font = Font(name="Meiryo UI", bold=True, size=12); c.alignment = A_L
+
+    cf_sections = [
+        ("営業活動によるキャッシュフロー", [
+            ("営業収入",    cf["operating_in"],  "E8F5E9"),
+            ("営業支出",   -cf["operating_out"], "FFF3E0"),
+        ], cf["operating_net"], "C8E6C9"),
+        ("投資活動によるキャッシュフロー", [
+            ("投資収入",    cf["investing_in"],  "E8F5E9"),
+            ("投資支出",   -cf["investing_out"], "FFF3E0"),
+        ], cf["investing_net"], "C8E6C9"),
+        ("財務活動によるキャッシュフロー", [
+            ("財務収入",    cf["financing_in"],  "E8F5E9"),
+            ("財務支出",   -cf["financing_out"], "FFF3E0"),
+        ], cf["financing_net"], "C8E6C9"),
+    ]
+    r = 2
+    for title, items, net, net_fc in cf_sections:
+        section_title(ws, r, f"【{title}】", 2); r += 1
+        for label, val, fc in items:
+            style(ws, r, 1, label, fill_color=fc)
+            style(ws, r, 2, val,   num=True, fill_color=fc); r += 1
+        total_row(ws, r, f"{title} 小計", net, 2, net_fc); r += 1
+        r += 1
+    fc_net = "C8E6C9" if cf["net_change"] >= 0 else "FFCDD2"
+    total_row(ws, r, "現金増減合計", cf["net_change"], 2, fc_net); r += 2
+
+    section_title(ws, r, "【収入源別内訳】", 2); r += 1
+    for src, vals in cf["source_breakdown"].items():
+        style(ws, r, 1, src)
+        style(ws, r, 2, vals["in"] - vals["out"], num=True); r += 1
+
+    # ── ⑤ 月次収支 ──────────────────────────────────────────────
+    ws = wb.create_sheet("月次収支")
+    ws.freeze_panes = "A3"
+    ws.merge_cells("A1:D1")
+    c = ws.cell(row=1, column=1, value=f"月次収支　{year_str}年度　（出力日：{today_str}）")
+    c.font = Font(name="Meiryo UI", bold=True, size=12); c.alignment = A_L
+    write_headers(ws, [("月",10),("収益",14),("費用",14),("純利益",14)])
+    for r, row in enumerate(yearly, 3):
+        fc = "E8F5E9" if row["net"] >= 0 else "FFCDD2"
+        style(ws, r, 1, row["month"],   center=True)
+        style(ws, r, 2, row["revenue"], num=True)
+        style(ws, r, 3, row["expense"], num=True)
+        style(ws, r, 4, row["net"],     num=True, fill_color=fc)
+    tr = len(yearly) + 3
+    total_row(ws, tr, "合計", sum(r["revenue"] for r in yearly), 2)
+    style(ws, tr, 3, sum(r["expense"] for r in yearly), num=True, fill_color="D6E4F0", bold=True)
+    fc_t = "C8E6C9" if sum(r["net"] for r in yearly) >= 0 else "FFCDD2"
+    style(ws, tr, 4, sum(r["net"] for r in yearly), num=True, fill_color=fc_t, bold=True)
+
     async with _aiosqlite.connect(DB_PATH) as con:
         con.row_factory = _aiosqlite.Row
 
