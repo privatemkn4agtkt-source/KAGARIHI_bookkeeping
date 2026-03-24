@@ -32,12 +32,18 @@
       width: 220px;
       background: var(--surface);
       border-right: 1px solid var(--border);
-      padding: 24px 0;
       flex-shrink: 0;
       position: sticky;
       top: 0;
       height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    nav .nav-links {
+      flex: 1;
       overflow-y: auto;
+      padding: 24px 0 8px;
     }
     nav .logo {
       padding: 0 20px 24px;
@@ -72,10 +78,7 @@
       letter-spacing: .08em;
     }
     nav .user-area {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
+      flex-shrink: 0;
       padding: 16px 20px;
       border-top: 1px solid var(--border);
       display: flex;
@@ -245,15 +248,17 @@
 </head>
 <body>
   <nav>
-    <div class="logo">
-      <span>🎸</span>KAGARIHI 会計
+    <div class="nav-links">
+      <div class="logo">
+        <span>🎸</span>KAGARIHI 会計
+      </div>
+      {% for section in nav_sections %}
+      <div class="section-label">{{ section.label }}</div>
+      {% for item in section['items'] %}
+      <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
+      {% endfor %}
+      {% endfor %}
     </div>
-    {% for section in nav_sections %}
-    <div class="section-label">{{ section.label }}</div>
-    {% for item in section['items'] %}
-    <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
-    {% endfor %}
-    {% endfor %}
 
     {% if user %}
     <div class="user-area">
