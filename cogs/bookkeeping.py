@@ -810,5 +810,108 @@ class Bookkeeping(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+    @app_commands.command(name="ダミーデータ挿入", description="デモ用のダミーデータを一括挿入します（開発・テスト用）")
+    async def insert_dummy_data(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        from datetime import date, timedelta
+        import random
+
+        today = date.today()
+
+        # ── イベント ──────────────────────────────────────────
+        events = ["春ライブ2025", "夏コミ2025", "秋ワンマン2025", "冬フェス2025"]
+        for ev in events:
+            await db.create_event(ev)
+
+        # ── メンバー ──────────────────────────────────────────
+        members = ["田中花子", "鈴木一郎", "佐藤めぐみ", "山田けんじ"]
+        for m in members:
+            await db.add_member(m)
+
+        # ── 仕訳データ ────────────────────────────────────────
+        journal_seeds = [
+            # (借方, 貸方, 金額, 摘要, 日付オフセット, イベントタグ)
+            ("普通預金", "売上", 150000, "4月定期公演チケット売上", -90, "春ライブ2025"),
+            ("普通預金", "Fanbox売上", 32000, "4月Fanbox収入", -88, None),
+            ("旅費交通費", "現金", 12400, "会場下見交通費", -85, "春ライブ2025"),
+            ("スタジオレンタル代", "普通預金", 28000, "リハーサルスタジオ代", -82, "春ライブ2025"),
+            ("会場レンタル代", "普通預金", 80000, "ライブ会場レンタル", -80, "春ライブ2025"),
+            ("普通預金", "グッズ売上", 95000, "グッズ物販売上", -79, "春ライブ2025"),
+            ("グッズ仕入", "買掛金", 45000, "缶バッジ仕入", -78, "春ライブ2025"),
+            ("買掛金", "普通預金", 45000, "缶バッジ代金支払い", -70, "春ライブ2025"),
+            ("宣伝広告費", "普通預金", 15000, "SNS広告費", -75, "夏コミ2025"),
+            ("機材費", "普通預金", 55000, "マイクスタンド購入", -60, None),
+            ("普通預金", "ストリーミング収益", 8500, "Spotify等ストリーミング収益", -55, None),
+            ("音源制作費", "未払金", 120000, "ミニアルバム録音費", -50, "秋ワンマン2025"),
+            ("MV制作費", "未払金", 200000, "MV制作費", -48, "秋ワンマン2025"),
+            ("未払金", "普通預金", 320000, "録音・MV制作費支払い", -30, "秋ワンマン2025"),
+            ("普通預金", "出演料", 50000, "フェス出演料", -25, "冬フェス2025"),
+            ("旅費交通費", "現金", 8600, "遠征交通費", -24, "冬フェス2025"),
+            ("配信サービス費", "普通預金", 3000, "配信ツール月額", -20, None),
+            ("通信費", "普通預金", 5500, "携帯通信費", -15, None),
+            ("消耗品費", "現金", 3200, "文房具・雑費", -10, None),
+            ("普通預金", "Booth売上", 41000, "Booth同人誌売上", -5, None),
+        ]
+        for debit, credit, amount, desc, offset, tag in journal_seeds:
+            entry_date = (today + timedelta(days=offset)).isoformat()
+            await db.add_journal_entry(
+                entry_date=entry_date,
+                debit_account=debit,
+                credit_account=credit,
+                amount=amount,
+                description=desc,
+                event_tag=tag,
+                tax_rate=10 if "売上" in credit or "売上" in desc else 0,
+            )
+
+        # ── 立替データ ────────────────────────────────────────
+        advances_seeds = [
+            ("田中花子", 3500, "会場下見の電車代", -86),
+            ("鈴木一郎", 12000, "スタジオ延長代 立替", -81),
+            ("佐藤めぐみ", 5400, "衣装クリーニング代", -60),
+            ("山田けんじ", 2800, "印刷費（セットリスト）", -22),
+        ]
+        for member, amount, desc, offset in advances_seeds:
+            entry_date = (today + timedelta(days=offset)).isoformat()
+            await db.add_advance(paid_by=member, amount=amount, description=desc, entry_date=entry_date)
+
+        # ── グッズ ────────────────────────────────────────────
+        goods_seeds = [
+            ("缶バッジセット", 800),
+            ("アクリルキーホルダー", 1200),
+            ("Tシャツ", 3500),
+            ("クリアファイル", 600),
+        ]
+        for gname, price in goods_seeds:
+            await db.add_goods(name=gname, selling_price=price)
+
+        # ── 予算 ──────────────────────────────────────────────
+        period = today.strftime("%Y-%m")
+        budget_seeds = [
+            ("旅費交通費", 30000),
+            ("スタジオレンタル代", 50000),
+            ("宣伝広告費", 20000),
+            ("消耗品費", 10000),
+            ("配信サービス費", 5000),
+            ("機材費", 100000),
+        ]
+        for acc, amount in budget_seeds:
+            await db.set_budget(account_name=acc, period=period, amount=amount)
+
+        embed = discord.Embed(
+            title="✅ ダミーデータ挿入完了",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="イベント", value=f"{len(events)} 件", inline=True)
+        embed.add_field(name="メンバー", value=f"{len(members)} 件", inline=True)
+        embed.add_field(name="仕訳", value=f"{len(journal_seeds)} 件", inline=True)
+        embed.add_field(name="立替", value=f"{len(advances_seeds)} 件", inline=True)
+        embed.add_field(name="グッズ", value=f"{len(goods_seeds)} 件", inline=True)
+        embed.add_field(name="予算", value=f"{len(budget_seeds)} 件", inline=True)
+        embed.set_footer(text="ダッシュボードを開いて確認してください")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(Bookkeeping(bot))
