@@ -250,7 +250,7 @@
     </div>
     {% for section in nav_sections %}
     <div class="section-label">{{ section.label }}</div>
-    {% for item in section.items %}
+    {% for item in section['items'] %}
     <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
     {% endfor %}
     {% endfor %}
