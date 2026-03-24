@@ -17,16 +17,18 @@ Discord Application の設定:
   1. https://discord.com/developers/applications でアプリを選択
   2. OAuth2 → Redirects に DISCORD_REDIRECT_URI を追加
 """
+import io
 import os
 import secrets
 import httpx
-from datetime import date
+from datetime import date, datetime
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
+import aiosqlite as _aiosqlite
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Query, Depends, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -99,10 +101,11 @@ NAV_SECTIONS = [
     {
         "label": "管理",
         "items": [
-            {"path": "/members",     "icon": "👥", "label": "メンバー管理"},
-            {"path": "/accounts",    "icon": "📂", "label": "勘定科目一覧"},
-            {"path": "/storage",     "icon": "💾", "label": "ストレージ確認"},
-            {"path": "/permissions", "icon": "🔑", "label": "許可管理"},
+            {"path": "/members",      "icon": "👥", "label": "メンバー管理"},
+            {"path": "/accounts",     "icon": "📂", "label": "勘定科目一覧"},
+            {"path": "/storage",      "icon": "💾", "label": "ストレージ確認"},
+            {"path": "/permissions",  "icon": "🔑", "label": "許可管理"},
+            {"path": "/export/excel", "icon": "📥", "label": "Excelダウンロード"},
         ],
     },
 ]
@@ -710,6 +713,150 @@ async def accounts_page(request: Request, user: dict = Depends(auth_guard)):
         "accounts": accounts,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.get("/export/excel")
+async def export_excel(request: Request, user: dict = Depends(auth_guard)):
+    """全取引データを書式付き Excel ファイルとしてダウンロード"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        return HTMLResponse("<h2>⚠️ openpyxl が未インストールです。update.sh を実行してください。</h2>", status_code=500)
+
+    # ── スタイル定義 ──────────────────────────────────────────────
+    def _fill(c): return PatternFill("solid", fgColor=c)
+    def _border():
+        s = Side(style="thin", color="BDBDBD")
+        return Border(left=s, right=s, top=s, bottom=s)
+    F_HEAD = Font(name="Meiryo UI", bold=True, color="FFFFFF", size=10)
+    F_BODY = Font(name="Meiryo UI", size=9)
+    A_C = Alignment(horizontal="center", vertical="center")
+    A_L = Alignment(horizontal="left",   vertical="center")
+    A_R = Alignment(horizontal="right",  vertical="center")
+
+    def write_headers(ws, headers):
+        for col, (label, width) in enumerate(headers, 1):
+            c = ws.cell(row=1, column=col, value=label)
+            c.font = F_HEAD; c.fill = _fill("1F3864")
+            c.alignment = A_C; c.border = _border()
+            ws.column_dimensions[get_column_letter(col)].width = width
+
+    def style(ws, row, col, val, *, num=False, center=False, fill_color=None):
+        c = ws.cell(row=row, column=col, value=val)
+        c.font = F_BODY; c.border = _border()
+        if fill_color: c.fill = _fill(fill_color)
+        if num:    c.number_format = '#,##0'; c.alignment = A_R
+        elif center: c.alignment = A_C
+        else:        c.alignment = A_L
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    async with _aiosqlite.connect(DB_PATH) as con:
+        con.row_factory = _aiosqlite.Row
+
+        # ── 仕訳帳 ──────────────────────────────────────────────
+        ws = wb.create_sheet("仕訳帳")
+        ws.freeze_panes = "A2"
+        write_headers(ws, [
+            ("ID",5),("日付",12),("借方科目",16),("貸方科目",16),
+            ("金額（税込）",14),("消費税率",10),("摘要",40),("イベント",16),("登録日時",18),
+        ])
+        async with con.execute("SELECT name, account_type FROM accounts") as cur:
+            acct_type = {r["name"]: r["account_type"] for r in await cur.fetchall()}
+        async with con.execute(
+            "SELECT id,entry_date,debit_account,credit_account,amount,tax_rate,description,event_tag,created_at "
+            "FROM journal_entries ORDER BY entry_date,id"
+        ) as cur:
+            for r, row in enumerate(await cur.fetchall(), 2):
+                dt = acct_type.get(row["debit_account"],""); ct = acct_type.get(row["credit_account"],"")
+                fc = "E8F5E9" if "収益" in (dt,ct) else "FFF3E0" if "費用" in (dt,ct) else None
+                style(ws,r,1,row["id"],      center=True,  fill_color=fc)
+                style(ws,r,2,row["entry_date"],            fill_color=fc)
+                style(ws,r,3,row["debit_account"],         fill_color=fc)
+                style(ws,r,4,row["credit_account"],        fill_color=fc)
+                style(ws,r,5,row["amount"],  num=True,     fill_color=fc)
+                style(ws,r,6,f'{row["tax_rate"]}%' if row["tax_rate"] else "0%", center=True, fill_color=fc)
+                style(ws,r,7,row["description"],           fill_color=fc)
+                style(ws,r,8,row["event_tag"] or "",       fill_color=fc)
+                style(ws,r,9,row["created_at"],            fill_color=fc)
+        ws.auto_filter.ref = "A1:I1"
+
+        # ── 立替精算 ─────────────────────────────────────────────
+        ws = wb.create_sheet("立替精算")
+        ws.freeze_panes = "A2"
+        write_headers(ws, [("ID",5),("日付",12),("立替者",14),("金額",12),("内容",40),("精算状況",10),("登録日時",18)])
+        async with con.execute(
+            "SELECT id,entry_date,paid_by,amount,description,settled,created_at FROM advances ORDER BY entry_date,id"
+        ) as cur:
+            for r, row in enumerate(await cur.fetchall(), 2):
+                fc = "F5F5F5" if row["settled"] else None
+                style(ws,r,1,row["id"],      center=True, fill_color=fc)
+                style(ws,r,2,row["entry_date"],           fill_color=fc)
+                style(ws,r,3,row["paid_by"],              fill_color=fc)
+                style(ws,r,4,row["amount"],  num=True,    fill_color=fc)
+                style(ws,r,5,row["description"],          fill_color=fc)
+                style(ws,r,6,"精算済" if row["settled"] else "未精算", center=True, fill_color=fc)
+                style(ws,r,7,row["created_at"],           fill_color=fc)
+
+        # ── グッズ取引 ───────────────────────────────────────────
+        ws = wb.create_sheet("グッズ取引")
+        ws.freeze_panes = "A2"
+        write_headers(ws, [("ID",5),("日付",12),("グッズ名",20),("種別",8),("数量",8),("単価",12),("合計金額",14),("摘要",30),("登録日時",18)])
+        async with con.execute(
+            "SELECT id,entry_date,goods_name,tx_type,quantity,unit_price,total_amount,description,created_at "
+            "FROM goods_transactions ORDER BY entry_date,id"
+        ) as cur:
+            for r, row in enumerate(await cur.fetchall(), 2):
+                fc = "E8F5E9" if row["tx_type"] == "販売" else "FFF3E0"
+                style(ws,r,1,row["id"],          center=True, fill_color=fc)
+                style(ws,r,2,row["entry_date"],              fill_color=fc)
+                style(ws,r,3,row["goods_name"],              fill_color=fc)
+                style(ws,r,4,row["tx_type"],     center=True, fill_color=fc)
+                style(ws,r,5,row["quantity"],    center=True, fill_color=fc)
+                style(ws,r,6,row["unit_price"],  num=True,    fill_color=fc)
+                style(ws,r,7,row["total_amount"],num=True,    fill_color=fc)
+                style(ws,r,8,row["description"],             fill_color=fc)
+                style(ws,r,9,row["created_at"],              fill_color=fc)
+
+        # ── グッズ在庫 ───────────────────────────────────────────
+        ws = wb.create_sheet("グッズ在庫")
+        ws.freeze_panes = "A2"
+        write_headers(ws, [("グッズ名",24),("販売単価",12),("現在庫数",10),("在庫評価額",14),("登録日時",18)])
+        async with con.execute("SELECT name,selling_price,stock,created_at FROM goods ORDER BY name") as cur:
+            for r, row in enumerate(await cur.fetchall(), 2):
+                style(ws,r,1,row["name"])
+                style(ws,r,2,row["selling_price"], num=True)
+                style(ws,r,3,row["stock"],         center=True)
+                style(ws,r,4,row["selling_price"]*row["stock"], num=True)
+                style(ws,r,5,row["created_at"])
+
+        # ── 勘定科目 ─────────────────────────────────────────────
+        ws = wb.create_sheet("勘定科目")
+        ws.freeze_panes = "A2"
+        write_headers(ws, [("ID",5),("勘定科目名",20),("種別",10)])
+        type_colors = {"資産":"E3F2FD","負債":"FCE4EC","資本":"F3E5F5","収益":"E8F5E9","費用":"FFF3E0"}
+        async with con.execute("SELECT id,name,account_type FROM accounts ORDER BY account_type,id") as cur:
+            for r, row in enumerate(await cur.fetchall(), 2):
+                fc = type_colors.get(row["account_type"])
+                style(ws,r,1,row["id"],           center=True, fill_color=fc)
+                style(ws,r,2,row["name"],                      fill_color=fc)
+                style(ws,r,3,row["account_type"], center=True, fill_color=fc)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    today = datetime.now().strftime("%Y%m%d")
+    filename = f"会計データ_{today}.xlsx"
+    encoded = filename.encode("utf-8").decode("latin-1", errors="replace")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename.replace(' ', '%20')}; filename=\"{encoded}\""},
+    )
 
 
 if __name__ == "__main__":
