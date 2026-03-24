@@ -678,8 +678,8 @@ class Bookkeeping(commands.Cog):
         日付: str | None = None,
         摘要: str = "",
     ):
-        if 数量 <= 0 or 仕入単価 <= 0:
-            await interaction.response.send_message("数量・単価は1以上を指定してください。", ephemeral=True)
+        if 数量 <= 0 or 仕入単価 < 0:
+            await interaction.response.send_message("数量は1以上、単価は0以上を指定してください。", ephemeral=True)
             return
         if not await db.goods_exists(グッズ名):
             await interaction.response.send_message(f"❌ 「{グッズ名}」は未登録です。`/グッズ登録` で先に登録してください。", ephemeral=True)
@@ -693,8 +693,8 @@ class Bookkeeping(commands.Cog):
 
         total = 数量 * 仕入単価
         desc = 摘要 or f"{グッズ名} 仕入 {数量}個"
-        # 仕訳: グッズ在庫 / 現金
-        jid = await db.add_journal_entry(entry_date, "グッズ在庫", "現金", total, desc, None, 10)
+        # 仕訳: グッズ在庫 / 現金（無償仕入の場合は仕訳不要）
+        jid = await db.add_journal_entry(entry_date, "グッズ在庫", "現金", total, desc, None, 10) if total > 0 else None
         tx_id = await db.record_goods_purchase(グッズ名, 数量, 仕入単価, entry_date, desc, jid)
 
         embed = discord.Embed(title="📥 グッズ仕入を記録しました", color=discord.Color.blue())
@@ -702,7 +702,7 @@ class Bookkeeping(commands.Cog):
         embed.add_field(name="数量", value=f"{数量} 個", inline=True)
         embed.add_field(name="仕入単価", value=fmt_amount(仕入単価), inline=True)
         embed.add_field(name="仕入総額", value=fmt_amount(total), inline=True)
-        embed.add_field(name="連携仕訳", value=f"#{jid:04d}", inline=True)
+        embed.add_field(name="連携仕訳", value=f"#{jid:04d}" if jid else "なし（無償仕入）", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
         await interaction.response.send_message(embed=embed)
 
