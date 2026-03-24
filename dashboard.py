@@ -273,7 +273,7 @@ async def denied(request: Request):
 # ─────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: dict = Depends(auth_guard)):
+async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None)):
     await db.record_page_visit("/")
     today = date.today()
     ym = today.strftime("%Y-%m")
@@ -298,6 +298,8 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
     tb = await db.get_trial_balance()
     tax_balances = {r["name"]: r["balance"] for r in tb if r["name"] in _TAX_ACCOUNTS}
 
+    accounts = await db.get_accounts()
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "user": user,
@@ -312,9 +314,36 @@ async def index(request: Request, user: dict = Depends(auth_guard)):
         "unsettled_advances": unsettled_advances,
         "advance_totals": sorted(advance_totals.items(), key=lambda x: -x[1]),
         "tax_balances": tax_balances,
+        "accounts": accounts,
+        "today": today.isoformat(),
+        "saved": saved,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.post("/journal/add")
+async def journal_add(
+    request: Request,
+    user: dict = Depends(auth_guard),
+    entry_date: str = Form(...),
+    debit_account: str = Form(...),
+    credit_account: str = Form(...),
+    amount: int = Form(...),
+    description: str = Form(default=""),
+    event_tag: str = Form(default=""),
+    tax_rate: int = Form(default=0),
+):
+    await db.add_journal_entry(
+        entry_date=entry_date,
+        debit_account=debit_account,
+        credit_account=credit_account,
+        amount=amount,
+        description=description,
+        event_tag=event_tag or None,
+        tax_rate=tax_rate,
+    )
+    return RedirectResponse("/?saved=1", status_code=303)
 
 
 @app.get("/pl", response_class=HTMLResponse)
