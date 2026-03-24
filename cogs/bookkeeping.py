@@ -8,7 +8,6 @@ from datetime import date
 import database as db
 
 CRIT_PERCENT = 90   # 月初自動警告の閾値 (%)
-DASHBOARD_URL = os.getenv("DASHBOARD_URL", "")
 
 
 def fmt_amount(n: int) -> str:
@@ -796,7 +795,17 @@ class Bookkeeping(commands.Cog):
                 ephemeral=True,
             )
             return
-        if not DASHBOARD_URL:
+        # .envファイルから最新のURLを動的に読み込む
+        dashboard_url = os.getenv("DASHBOARD_URL", "")
+        env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        if os.path.exists(env_file):
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("DASHBOARD_URL="):
+                        dashboard_url = line.split("=", 1)[1].strip()
+                        break
+        if not dashboard_url:
             await interaction.response.send_message(
                 "⚠️ ダッシュボードURLが設定されていません（環境変数 `DASHBOARD_URL`）。",
                 ephemeral=True,
@@ -804,7 +813,7 @@ class Bookkeeping(commands.Cog):
             return
         embed = discord.Embed(
             title="📊 会計ダッシュボード",
-            description=f"[ダッシュボードを開く]({DASHBOARD_URL})\n\n許可管理はダッシュボードの「許可管理」ページから行えます。",
+            description=f"[ダッシュボードを開く]({dashboard_url})\n\n許可管理はダッシュボードの「許可管理」ページから行えます。",
             color=discord.Color.blurple(),
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
