@@ -849,13 +849,13 @@ async def export_excel(request: Request, user: dict = Depends(auth_guard)):
     wb.save(buf)
     buf.seek(0)
 
+    from urllib.parse import quote
     today = datetime.now().strftime("%Y%m%d")
     filename = f"会計データ_{today}.xlsx"
-    encoded = filename.encode("utf-8").decode("latin-1", errors="replace")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename.replace(' ', '%20')}; filename=\"{encoded}\""},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
