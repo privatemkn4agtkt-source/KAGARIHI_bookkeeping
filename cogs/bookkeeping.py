@@ -195,9 +195,14 @@ class Bookkeeping(commands.Cog):
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         accounts = await db.get_accounts_with_usage()
+        common_set = dict.fromkeys(db.COMMON_ACCOUNTS)
+        common  = [a for a in sorted(accounts, key=lambda a: list(common_set).index(a["name"]) if a["name"] in common_set else 999) if a["name"] in common_set]
+        others  = [a for a in accounts if a["name"] not in common_set]
+        ordered = common + others
+        q = current.lower()
         return [
             app_commands.Choice(name=a["name"], value=a["name"])
-            for a in accounts if current.lower() in a["name"].lower()
+            for a in ordered if q in a["name"].lower()
         ][:25]
 
     async def _event_autocomplete(
