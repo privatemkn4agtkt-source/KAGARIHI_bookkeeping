@@ -20,7 +20,9 @@ Discord Application の設定:
 import io
 import os
 import secrets
+import time as _time
 import httpx
+from collections import defaultdict as _defaultdict
 from datetime import date, datetime
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode
@@ -155,6 +157,40 @@ def fmt(n: int) -> str:
 
 
 # ─────────────────────────────────────────────────────────
+# ログイン試行レート制限
+# ─────────────────────────────────────────────────────────
+
+_LOGIN_MAX_ATTEMPTS = 5    # 同一IPで失敗できる最大回数
+_LOGIN_WINDOW_SEC   = 900  # 集計ウィンドウ（秒）= 15分
+
+_login_failures: dict[str, list[float]] = _defaultdict(list)  # IP → タイムスタンプ
+
+
+def _prune(ip: str) -> None:
+    cutoff = _time.monotonic() - _LOGIN_WINDOW_SEC
+    _login_failures[ip] = [t for t in _login_failures[ip] if t > cutoff]
+
+
+def _is_rate_limited(ip: str) -> tuple[bool, int]:
+    """(ブロック中か, 解除まで残り分) を返す"""
+    _prune(ip)
+    fails = _login_failures[ip]
+    if len(fails) >= _LOGIN_MAX_ATTEMPTS:
+        wait_sec = int(_LOGIN_WINDOW_SEC - (_time.monotonic() - fails[0])) + 1
+        return True, max((wait_sec + 59) // 60, 1)
+    return False, 0
+
+
+def _record_failure(ip: str) -> None:
+    _prune(ip)
+    _login_failures[ip].append(_time.monotonic())
+
+
+def _clear_failures(ip: str) -> None:
+    _login_failures.pop(ip, None)
+
+
+# ─────────────────────────────────────────────────────────
 # 認証ヘルパー
 # ─────────────────────────────────────────────────────────
 
@@ -186,18 +222,27 @@ async def auth_guard(request: Request) -> dict:
 # ─────────────────────────────────────────────────────────
 
 @app.get("/auth/login", response_class=HTMLResponse)
-async def login(request: Request):
-    """Discord の OAuth2 認証画面へリダイレクト"""
+async def login_page(request: Request, error: str = Query(default=""), wait: int = Query(default=0)):
+    """ログインページを表示（Discord + メール両方のフォーム）"""
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "wait": wait,
+        "discord_available": bool(CLIENT_ID and CLIENT_SECRET),
+    })
+
+
+@app.get("/auth/discord")
+async def discord_login(request: Request):
+    """Discord OAuth2 フローを開始"""
     if not CLIENT_ID or not CLIENT_SECRET:
         return HTMLResponse(
             "<h2>⚠️ DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET が未設定です。</h2>"
             "<p>.env ファイルを確認してください。</p>",
             status_code=500,
         )
-    # CSRF 対策: state トークンをセッションに保存
     state = secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
-
     params = urlencode({
         "client_id":     CLIENT_ID,
         "redirect_uri":  REDIRECT_URI,
@@ -274,9 +319,18 @@ async def email_login(
     email: str = Form(...),
     password: str = Form(...),
 ):
+    ip = request.client.host if request.client else "unknown"
+
+    blocked, wait_min = _is_rate_limited(ip)
+    if blocked:
+        return RedirectResponse(f"/auth/login?error=locked&wait={wait_min}", status_code=303)
+
     local_user = await db.get_local_user_by_email(email)
     if not local_user or not db.verify_password(password, local_user["password_hash"]):
+        _record_failure(ip)
         return RedirectResponse("/auth/login?error=invalid", status_code=303)
+
+    _clear_failures(ip)
     request.session["user"] = {
         "id":          f"email:{local_user['email']}",
         "username":    local_user["email"],
