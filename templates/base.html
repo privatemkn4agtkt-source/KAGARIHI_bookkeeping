@@ -284,10 +284,10 @@
       {% for section in nav_sections %}
       {% set always_open = section.label in ['概要', '明細'] %}
       {% set has_active = namespace(found=false) %}
-      {% for item in section.items %}{% if request.url.path == item.path %}{% set has_active.found = true %}{% endif %}{% endfor %}
+      {% for item in section['items'] %}{% if request.url.path == item.path %}{% set has_active.found = true %}{% endif %}{% endfor %}
       {% if always_open %}
       <div class="section-label">{{ section.label }}</div>
-      {% for item in section.items %}
+      {% for item in section['items'] %}
       <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
       {% endfor %}
       {% else %}
@@ -295,7 +295,7 @@
         {{ section.label }}<i class="chevron">▾</i>
       </button>
       <div class="nav-items{{ ' open' if has_active.found }}">
-        {% for item in section.items %}
+        {% for item in section['items'] %}
         <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
         {% endfor %}
       </div>
