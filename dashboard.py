@@ -139,6 +139,15 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=60 * 60
 templates = Jinja2Templates(directory="templates")
 
 
+async def get_accounts_grouped() -> tuple[list[dict], list[dict]]:
+    """よく使う科目とその他に分けて返す"""
+    all_accounts = await db.get_accounts_with_usage()
+    common_set = dict.fromkeys(db.COMMON_ACCOUNTS)  # 順序付き集合として利用
+    common = [a for a in sorted(all_accounts, key=lambda a: list(common_set).index(a["name"]) if a["name"] in common_set else 999) if a["name"] in common_set]
+    others = [a for a in all_accounts if a["name"] not in common_set]
+    return common, others
+
+
 def fmt(n: int) -> str:
     if n < 0:
         return f"▲{abs(n):,}円"
@@ -299,7 +308,7 @@ async def index(request: Request, user: dict = Depends(auth_guard), saved: str =
     tax_balances = {r["name"]: r["balance"] for r in tb if r["name"] in _TAX_ACCOUNTS}
 
     accounts = await db.get_accounts()
-    accounts_by_usage = await db.get_accounts_with_usage()
+    accounts_common, accounts_other = await get_accounts_grouped()
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -316,7 +325,8 @@ async def index(request: Request, user: dict = Depends(auth_guard), saved: str =
         "advance_totals": sorted(advance_totals.items(), key=lambda x: -x[1]),
         "tax_balances": tax_balances,
         "accounts": accounts,
-        "accounts_by_usage": accounts_by_usage,
+        "accounts_common": accounts_common,
+        "accounts_other": accounts_other,
         "events": events,
         "today": today.isoformat(),
         "saved": saved,
@@ -437,11 +447,12 @@ async def journal(
     limit = min(max(limit, 1), 200)
     entries = await db.get_journal_entries_filtered(start, end, account, limit)
     accounts = await db.get_accounts()
-    accounts_by_usage = await db.get_accounts_with_usage()
+    accounts_common, accounts_other = await get_accounts_grouped()
     return templates.TemplateResponse("journal.html", {
         "request": request, "user": user,
         "entries": entries, "accounts": accounts,
-        "accounts_by_usage": accounts_by_usage,
+        "accounts_common": accounts_common,
+        "accounts_other": accounts_other,
         "start": start or "", "end": end or "",
         "account": account or "", "limit": limit, "fmt": fmt,
         "deleted": deleted, "updated": updated,

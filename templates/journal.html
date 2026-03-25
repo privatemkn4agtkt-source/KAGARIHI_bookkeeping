@@ -104,14 +104,24 @@
             <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">借方科目</label>
             <select name="debit_account" id="editDebit"
               style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-              {% for a in accounts_by_usage %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+              <optgroup label="よく使う">
+                {% for a in accounts_common %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+              </optgroup>
+              <optgroup label="その他">
+                {% for a in accounts_other %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+              </optgroup>
             </select>
           </div>
           <div>
             <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">貸方科目</label>
             <select name="credit_account" id="editCredit"
               style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-              {% for a in accounts_by_usage %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+              <optgroup label="よく使う">
+                {% for a in accounts_common %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+              </optgroup>
+              <optgroup label="その他">
+                {% for a in accounts_other %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+              </optgroup>
             </select>
           </div>
         </div>
