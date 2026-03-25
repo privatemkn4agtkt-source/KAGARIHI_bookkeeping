@@ -1,4 +1,3 @@
-import csv
 import io
 import os
 import discord
@@ -220,6 +219,45 @@ class Bookkeeping(commands.Cog):
         ][:25]
 
     # =========================================================================
+    # ダッシュボード
+    # =========================================================================
+
+    async def _is_dashboard_allowed(self, discord_user_id: str) -> bool:
+        """コマンド実行者がダッシュボード許可リストに含まれているか確認"""
+        return await db.is_allowed_user(discord_user_id)
+
+    @app_commands.command(name="ダッシュボード", description="会計ダッシュボードのURLを表示します（許可ユーザーのみ）")
+    async def show_dashboard(self, interaction: discord.Interaction):
+        if not await self._is_dashboard_allowed(str(interaction.user.id)):
+            await interaction.response.send_message(
+                "❌ 閲覧権限がありません。ダッシュボードの許可管理ページで権限を付与してもらってください。",
+                ephemeral=True,
+            )
+            return
+        # .envファイルから最新のURLを動的に読み込む
+        dashboard_url = os.getenv("DASHBOARD_URL", "")
+        env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        if os.path.exists(env_file):
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("DASHBOARD_URL="):
+                        dashboard_url = line.split("=", 1)[1].strip()
+                        break
+        if not dashboard_url:
+            await interaction.response.send_message(
+                "⚠️ ダッシュボードURLが設定されていません（環境変数 `DASHBOARD_URL`）。",
+                ephemeral=True,
+            )
+            return
+        embed = discord.Embed(
+            title="📊 会計ダッシュボード",
+            description=f"[ダッシュボードを開く]({dashboard_url})\n\n許可管理はダッシュボードの「許可管理」ページから行えます。",
+            color=discord.Color.blurple(),
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # =========================================================================
     # 仕訳
     # =========================================================================
 
@@ -298,6 +336,90 @@ class Bookkeeping(commands.Cog):
         embed.set_footer(text=f"入力ミスは「取り消す」ボタン、または /仕訳削除 {entry_id} で取り消せます（60秒以内はボタンで即時取り消し）")
         view = CancelEntryView(entry_id, interaction.user.id)
         await interaction.response.send_message(embed=embed, view=view)
+
+    @app_commands.command(name="仕訳削除", description="指定したIDの仕訳を削除します（確認あり）")
+    @app_commands.describe(仕訳id="削除する仕訳のID（/仕訳帳 で確認できます）")
+    async def delete_entry(self, interaction: discord.Interaction, 仕訳id: int):
+        entry = await db.get_journal_entry(仕訳id)
+        if not entry:
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
+            return
+
+        event_str = f"\nイベント: {entry['event_tag']}" if entry.get("event_tag") else ""
+        content = (
+            f"以下の仕訳を削除しますか？\n"
+            f"**#{entry['id']:04d}** {entry['entry_date']}　"
+            f"**{entry['debit_account']}** / **{entry['credit_account']}**　"
+            f"{fmt_amount(entry['amount'])}　{entry['description']}{event_str}"
+        )
+        view = ConfirmDeleteEntryView(entry)
+        await interaction.response.send_message(content, view=view, ephemeral=True)
+
+    @app_commands.command(name="仕訳編集", description="既存の仕訳を編集します")
+    @app_commands.describe(
+        仕訳id="編集する仕訳のID",
+        借方="新しい借方勘定科目",
+        貸方="新しい貸方勘定科目",
+        金額="新しい金額",
+        摘要="新しい摘要",
+        日付="新しい日付 YYYY-MM-DD",
+        イベント="新しいイベントタグ（空文字で解除）",
+    )
+    @app_commands.autocomplete(借方=_account_autocomplete, 貸方=_account_autocomplete, イベント=_event_autocomplete)
+    async def edit_entry(
+        self,
+        interaction: discord.Interaction,
+        仕訳id: int,
+        借方: str | None = None,
+        貸方: str | None = None,
+        金額: int | None = None,
+        摘要: str | None = None,
+        日付: str | None = None,
+        イベント: str | None = None,
+    ):
+        entry = await db.get_journal_entry(仕訳id)
+        if not entry:
+            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
+            return
+
+        new_debit   = 借方 or entry["debit_account"]
+        new_credit  = 貸方 or entry["credit_account"]
+        new_amount  = 金額 if 金額 is not None else entry["amount"]
+        new_desc    = 摘要 or entry["description"]
+        new_date    = 日付 or entry["entry_date"]
+        new_tag     = (イベント if イベント != "" else None) if イベント is not None else entry["event_tag"]
+
+        if new_amount <= 0:
+            await interaction.response.send_message("金額は1以上の整数を指定してください。", ephemeral=True)
+            return
+        try:
+            date.fromisoformat(new_date)
+        except ValueError:
+            await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
+            return
+        if not await db.account_exists(new_debit):
+            await interaction.response.send_message(f"勘定科目「{new_debit}」は登録されていません。", ephemeral=True)
+            return
+        if not await db.account_exists(new_credit):
+            await interaction.response.send_message(f"勘定科目「{new_credit}」は登録されていません。", ephemeral=True)
+            return
+        if new_tag and not await db.event_exists(new_tag):
+            await interaction.response.send_message(f"イベント「{new_tag}」は登録されていません。", ephemeral=True)
+            return
+
+        await db.update_journal_entry(仕訳id, new_date, new_debit, new_credit, new_amount, new_desc, new_tag)
+
+        embed = discord.Embed(title=f"✏️ 仕訳 #{仕訳id:04d} を編集しました", color=discord.Color.orange())
+        embed.add_field(name="日付", value=new_date, inline=True)
+        embed.add_field(name="金額", value=fmt_amount(new_amount), inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="借方", value=new_debit, inline=True)
+        embed.add_field(name="貸方", value=new_credit, inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="摘要", value=new_desc, inline=False)
+        if new_tag:
+            embed.add_field(name="イベント", value=new_tag, inline=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # =========================================================================
     # イベント管理
@@ -386,10 +508,10 @@ class Bookkeeping(commands.Cog):
                 value=f"仕訳 #{entry_id:04d}　{費用科目} / 未払金　{fmt_amount(金額)}",
                 inline=False,
             )
-        embed.set_footer(text=f"精算時は /立替精算済み {advance_id} を使用してください")
+        embed.set_footer(text=f"精算時は /立替精算 {advance_id} を使用してください")
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="立替精算済み", description="指定した立替を精算済みにします")
+    @app_commands.command(name="立替精算", description="指定した立替を精算済みにします")
     @app_commands.describe(
         立替id="精算済みにする立替のID（/立替精算表 で確認）",
         仕訳作成="Trueにすると「未払金 / 現金」の精算仕訳も自動作成します",
@@ -456,74 +578,6 @@ class Bookkeeping(commands.Cog):
         else:
             await interaction.response.send_message(f"❌ 「{名前}」はすでに登録されています。", ephemeral=True)
 
-    # =========================================================================
-    # 仕訳削除・ストレージ確認
-    # =========================================================================
-
-    @app_commands.command(name="仕訳削除", description="指定したIDの仕訳を削除します（確認あり）")
-    @app_commands.describe(仕訳id="削除する仕訳のID（/仕訳帳 で確認できます）")
-    async def delete_entry(self, interaction: discord.Interaction, 仕訳id: int):
-        entry = await db.get_journal_entry(仕訳id)
-        if not entry:
-            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
-            return
-
-        event_str = f"\nイベント: {entry['event_tag']}" if entry.get("event_tag") else ""
-        content = (
-            f"以下の仕訳を削除しますか？\n"
-            f"**#{entry['id']:04d}** {entry['entry_date']}　"
-            f"**{entry['debit_account']}** / **{entry['credit_account']}**　"
-            f"{fmt_amount(entry['amount'])}　{entry['description']}{event_str}"
-        )
-        view = ConfirmDeleteEntryView(entry)
-        await interaction.response.send_message(content, view=view, ephemeral=True)
-
-    @app_commands.command(name="エクスポート", description="仕訳帳をCSVファイルとして出力します")
-    @app_commands.describe(
-        開始日="出力開始日 YYYY-MM-DD（省略時: 全期間）",
-        終了日="出力終了日 YYYY-MM-DD（省略時: 全期間）",
-    )
-    async def export_csv(
-        self,
-        interaction: discord.Interaction,
-        開始日: str | None = None,
-        終了日: str | None = None,
-    ):
-        for d in [開始日, 終了日]:
-            if d:
-                try:
-                    date.fromisoformat(d)
-                except ValueError:
-                    await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
-                    return
-
-        entries = await db.get_journal_entries_filtered(開始日, 終了日, None, limit=10000)
-        if not entries:
-            await interaction.response.send_message("出力する仕訳がありません。", ephemeral=True)
-            return
-
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["ID", "日付", "借方", "貸方", "金額", "摘要", "イベント"])
-        for e in sorted(entries, key=lambda x: (x["entry_date"], x["id"])):
-            writer.writerow([
-                e["id"], e["entry_date"], e["debit_account"],
-                e["credit_account"], e["amount"], e["description"],
-                e.get("event_tag") or "",
-            ])
-
-        buf.seek(0)
-        period_str = ""
-        if 開始日 or 終了日:
-            period_str = f"_{開始日 or ''}_{終了日 or ''}"
-        filename = f"仕訳帳{period_str}_{date.today()}.csv"
-        file = discord.File(fp=io.BytesIO(buf.getvalue().encode("utf-8-sig")), filename=filename)
-        await interaction.response.send_message(
-            f"✅ {len(entries)} 件をCSVで出力しました。",
-            file=file,
-            ephemeral=True,
-        )
-
     @app_commands.command(name="バックアップ", description="DBファイルをこのチャンネルに送信してバックアップします")
     async def backup(self, interaction: discord.Interaction):
         import database as dbmod
@@ -537,72 +591,6 @@ class Bookkeeping(commands.Cog):
             file=file,
             ephemeral=True,
         )
-
-    @app_commands.command(name="仕訳編集", description="既存の仕訳を編集します")
-    @app_commands.describe(
-        仕訳id="編集する仕訳のID",
-        借方="新しい借方勘定科目",
-        貸方="新しい貸方勘定科目",
-        金額="新しい金額",
-        摘要="新しい摘要",
-        日付="新しい日付 YYYY-MM-DD",
-        イベント="新しいイベントタグ（空文字で解除）",
-    )
-    @app_commands.autocomplete(借方=_account_autocomplete, 貸方=_account_autocomplete, イベント=_event_autocomplete)
-    async def edit_entry(
-        self,
-        interaction: discord.Interaction,
-        仕訳id: int,
-        借方: str | None = None,
-        貸方: str | None = None,
-        金額: int | None = None,
-        摘要: str | None = None,
-        日付: str | None = None,
-        イベント: str | None = None,
-    ):
-        entry = await db.get_journal_entry(仕訳id)
-        if not entry:
-            await interaction.response.send_message(f"❌ 仕訳 #{仕訳id:04d} が見つかりません。", ephemeral=True)
-            return
-
-        new_debit   = 借方 or entry["debit_account"]
-        new_credit  = 貸方 or entry["credit_account"]
-        new_amount  = 金額 if 金額 is not None else entry["amount"]
-        new_desc    = 摘要 or entry["description"]
-        new_date    = 日付 or entry["entry_date"]
-        new_tag     = (イベント if イベント != "" else None) if イベント is not None else entry["event_tag"]
-
-        if new_amount <= 0:
-            await interaction.response.send_message("金額は1以上の整数を指定してください。", ephemeral=True)
-            return
-        try:
-            date.fromisoformat(new_date)
-        except ValueError:
-            await interaction.response.send_message("日付は YYYY-MM-DD 形式で入力してください。", ephemeral=True)
-            return
-        if not await db.account_exists(new_debit):
-            await interaction.response.send_message(f"勘定科目「{new_debit}」は登録されていません。", ephemeral=True)
-            return
-        if not await db.account_exists(new_credit):
-            await interaction.response.send_message(f"勘定科目「{new_credit}」は登録されていません。", ephemeral=True)
-            return
-        if new_tag and not await db.event_exists(new_tag):
-            await interaction.response.send_message(f"イベント「{new_tag}」は登録されていません。", ephemeral=True)
-            return
-
-        await db.update_journal_entry(仕訳id, new_date, new_debit, new_credit, new_amount, new_desc, new_tag)
-
-        embed = discord.Embed(title=f"✏️ 仕訳 #{仕訳id:04d} を編集しました", color=discord.Color.orange())
-        embed.add_field(name="日付", value=new_date, inline=True)
-        embed.add_field(name="金額", value=fmt_amount(new_amount), inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-        embed.add_field(name="借方", value=new_debit, inline=True)
-        embed.add_field(name="貸方", value=new_credit, inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)
-        embed.add_field(name="摘要", value=new_desc, inline=False)
-        if new_tag:
-            embed.add_field(name="イベント", value=new_tag, inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="仕訳タグ変更", description="仕訳のイベントタグを後から変更・解除します")
     @app_commands.describe(
@@ -778,46 +766,6 @@ class Bookkeeping(commands.Cog):
             await interaction.response.send_message(f"✅ 「{グッズ名}」を削除しました。")
         else:
             await interaction.response.send_message(f"❌ {msg}", ephemeral=True)
-
-    # =========================================================================
-    # ダッシュボード閲覧権限管理
-    # =========================================================================
-
-    async def _is_dashboard_allowed(self, discord_user_id: str) -> bool:
-        """コマンド実行者がダッシュボード許可リストに含まれているか確認"""
-        return await db.is_allowed_user(discord_user_id)
-
-    @app_commands.command(name="ダッシュボード", description="会計ダッシュボードのURLを表示します（許可ユーザーのみ）")
-    async def show_dashboard(self, interaction: discord.Interaction):
-        if not await self._is_dashboard_allowed(str(interaction.user.id)):
-            await interaction.response.send_message(
-                "❌ 閲覧権限がありません。ダッシュボードの許可管理ページで権限を付与してもらってください。",
-                ephemeral=True,
-            )
-            return
-        # .envファイルから最新のURLを動的に読み込む
-        dashboard_url = os.getenv("DASHBOARD_URL", "")
-        env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
-        if os.path.exists(env_file):
-            with open(env_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("DASHBOARD_URL="):
-                        dashboard_url = line.split("=", 1)[1].strip()
-                        break
-        if not dashboard_url:
-            await interaction.response.send_message(
-                "⚠️ ダッシュボードURLが設定されていません（環境変数 `DASHBOARD_URL`）。",
-                ephemeral=True,
-            )
-            return
-        embed = discord.Embed(
-            title="📊 会計ダッシュボード",
-            description=f"[ダッシュボードを開く]({dashboard_url})\n\n許可管理はダッシュボードの「許可管理」ページから行えます。",
-            color=discord.Color.blurple(),
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
     @app_commands.command(name="ダミーデータ挿入", description="デモ用のダミーデータを一括挿入します（開発・テスト用）")
     async def insert_dummy_data(self, interaction: discord.Interaction):
