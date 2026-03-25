@@ -51,7 +51,9 @@
         <td><span class="badge badge-exp">借</span> {{ e.debit_account }}</td>
         <td><span class="badge badge-rev">貸</span> {{ e.credit_account }}</td>
         <td class="text-right amount neutral">{{ fmt(e.amount) }}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.description }}</td>
+        <td style="max-width:200px;">
+          <div class="desc-cell">{{ e.description }}</div>
+        </td>
         <td>
           {% if e.event_tag %}<span class="tag event">🎸 {{ e.event_tag }}</span>{% endif %}
         </td>
@@ -148,6 +150,28 @@
     </form>
   </div>
 </div>
+
+<style>
+  .desc-cell {
+    max-width: 200px;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    padding-bottom: 2px;
+    cursor: default;
+  }
+  .desc-cell::-webkit-scrollbar {
+    height: 4px;
+  }
+  .desc-cell::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .desc-cell::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+  }
+</style>
 
 <script>
   function openEditModal(id, date, debit, credit, amount, description, eventTag) {
