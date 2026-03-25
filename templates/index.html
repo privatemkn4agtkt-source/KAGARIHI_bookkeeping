@@ -14,7 +14,7 @@
   {% endif %}
 
   <form method="post" action="/journal/add" style="display:flex;flex-direction:column;gap:12px;">
-    <div class="form-grid-5">
+    <div class="form-grid-4">
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
         <input type="date" name="entry_date" value="{{ today }}" required
@@ -22,32 +22,24 @@
       </div>
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">借方科目</label>
-        <select name="debit_account" id="debitAccount" required
+        <select name="debit_account" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-          <option value="" data-type="">選択してください</option>
-          {% for a in accounts %}<option value="{{ a.name }}" data-type="{{ a.account_type }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+          <option value="">選択してください</option>
+          {% for a in accounts %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
         </select>
       </div>
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">貸方科目</label>
-        <select name="credit_account" id="creditAccount" required
+        <select name="credit_account" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-          <option value="" data-type="">選択してください</option>
-          {% for a in accounts %}<option value="{{ a.name }}" data-type="{{ a.account_type }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+          <option value="">選択してください</option>
+          {% for a in accounts %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
         </select>
       </div>
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">金額（円）</label>
         <input type="number" name="amount" min="1" placeholder="例: 10000" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-      </div>
-      <div id="taxRateWrap" style="visibility:hidden;">
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">消費税率</label>
-        <select name="tax_rate" id="taxRate"
-          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-          <option value="0">0%（非課税）</option>
-          <option value="10" selected>10%</option>
-        </select>
       </div>
     </div>
     <div class="form-grid-3">
@@ -274,30 +266,6 @@
 </div>
 
 <script>
-  // ── 消費税欄の表示制御 ──
-  const TAX_TYPES = new Set(['収益', '費用']);
-
-  function selectedType(selectEl) {
-    const opt = selectEl.options[selectEl.selectedIndex];
-    return opt ? (opt.dataset.type || '') : '';
-  }
-
-  function updateTaxField() {
-    const debitType  = selectedType(document.getElementById('debitAccount'));
-    const creditType = selectedType(document.getElementById('creditAccount'));
-    const wrap = document.getElementById('taxRateWrap');
-    const taxSel = document.getElementById('taxRate');
-    if (TAX_TYPES.has(debitType) || TAX_TYPES.has(creditType)) {
-      wrap.style.visibility = 'visible';
-    } else {
-      wrap.style.visibility = 'hidden';
-      taxSel.value = '0';
-    }
-  }
-
-  document.getElementById('debitAccount').addEventListener('change', updateTaxField);
-  document.getElementById('creditAccount').addEventListener('change', updateTaxField);
-
   // ── 精算モーダル ──
   const today = new Date().toISOString().slice(0, 10);
 
