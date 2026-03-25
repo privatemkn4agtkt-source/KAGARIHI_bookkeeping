@@ -72,6 +72,65 @@
   </form>
 </div>
 
+<!-- 立替払い（未精算） -->
+<div class="card" style="margin-bottom:24px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <h2 style="margin:0;">💴 立替払い（未精算）</h2>
+    {% if unsettled_advances %}
+    <span style="font-size:13px;color:var(--muted);">{{ unsettled_advances|length }} 件</span>
+    {% endif %}
+  </div>
+
+  {% if unsettled_advances %}
+  <!-- メンバー別合計 -->
+  {% if advance_totals %}
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+    {% for name, total in advance_totals %}
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:120px;">
+      <div class="card-title" style="margin-bottom:4px;">{{ name }}</div>
+      <div style="font-size:18px;font-weight:700;color:var(--gold);">{{ fmt(total) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>日付</th>
+        <th>立替者</th>
+        <th>内容</th>
+        <th class="text-right">金額</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in unsettled_advances %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">{{ "%04d"|format(a.id) }}</td>
+        <td>{{ a.entry_date }}</td>
+        <td><span class="badge badge-asset">{{ a.paid_by }}</span></td>
+        <td>{{ a.description }}</td>
+        <td class="text-right amount neutral">{{ fmt(a.amount) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="4" class="text-right">合計</td>
+        <td class="text-right amount neutral">{{ fmt(unsettled_advances|sum(attribute='amount')) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <div style="color:var(--muted);padding:8px 0;">未精算の立替はありません。</div>
+  {% endif %}
+
+  <div style="color:var(--muted);font-size:12px;margin-top:12px;">
+    記録・精算は Discord の <code>/立替記録</code>・<code>/立替精算</code> で行えます
+  </div>
+</div>
+
 <!-- KPI カード -->
 <div class="grid grid-4" style="margin-bottom:24px;">
   <div class="card">
@@ -160,62 +219,4 @@
   </div>
 </div>
 
-<!-- 立替払い（未精算） -->
-<div class="card">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-    <h2 style="margin:0;">💴 立替払い（未精算）</h2>
-    {% if unsettled_advances %}
-    <span style="font-size:13px;color:var(--muted);">{{ unsettled_advances|length }} 件</span>
-    {% endif %}
-  </div>
-
-  {% if unsettled_advances %}
-  <!-- メンバー別合計 -->
-  {% if advance_totals %}
-  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
-    {% for name, total in advance_totals %}
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:120px;">
-      <div class="card-title" style="margin-bottom:4px;">{{ name }}</div>
-      <div style="font-size:18px;font-weight:700;color:var(--gold);">{{ fmt(total) }}</div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>日付</th>
-        <th>立替者</th>
-        <th>内容</th>
-        <th class="text-right">金額</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for a in unsettled_advances %}
-      <tr>
-        <td style="color:var(--muted);font-size:12px;">{{ "%04d"|format(a.id) }}</td>
-        <td>{{ a.entry_date }}</td>
-        <td><span class="badge badge-asset">{{ a.paid_by }}</span></td>
-        <td>{{ a.description }}</td>
-        <td class="text-right amount neutral">{{ fmt(a.amount) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr class="total-row">
-        <td colspan="4" class="text-right">合計</td>
-        <td class="text-right amount neutral">{{ fmt(unsettled_advances|sum(attribute='amount')) }}</td>
-      </tr>
-    </tfoot>
-  </table>
-  {% else %}
-  <div style="color:var(--muted);padding:8px 0;">未精算の立替はありません。</div>
-  {% endif %}
-
-  <div style="color:var(--muted);font-size:12px;margin-top:12px;">
-    記録・精算は Discord の <code>/立替記録</code>・<code>/立替精算済み</code> で行えます
-  </div>
-</div>
 {% endblock %}
