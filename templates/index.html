@@ -25,7 +25,7 @@
         <select name="debit_account" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
           <option value="">選択してください</option>
-          {% for a in accounts %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+          {% for a in accounts_by_usage %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
         </select>
       </div>
       <div>
@@ -33,7 +33,7 @@
         <select name="credit_account" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
           <option value="">選択してください</option>
-          {% for a in accounts %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+          {% for a in accounts_by_usage %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
         </select>
       </div>
       <div>
