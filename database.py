@@ -442,6 +442,22 @@ async def get_trial_balance() -> list[dict]:
             return result
 
 
+async def get_account_balance(account_name: str) -> int:
+    """指定科目の現在残高を返す（資産・費用: 借方合計 - 貸方合計）"""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(CASE WHEN debit_account  = ? THEN amount ELSE 0 END), 0) -
+                COALESCE(SUM(CASE WHEN credit_account = ? THEN amount ELSE 0 END), 0)
+            FROM journal_entries
+            """,
+            (account_name, account_name),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+
 # =============================================================================
 # 総勘定元帳
 # =============================================================================

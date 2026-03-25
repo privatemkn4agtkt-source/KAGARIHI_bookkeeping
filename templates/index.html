@@ -12,6 +12,11 @@
     ✅ 仕訳を登録しました
   </div>
   {% endif %}
+  {% if error_msg %}
+  <div style="background:#3a1a1a;border:1px solid var(--red);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--red);font-size:14px;">
+    ❌ {{ error_msg }}
+  </div>
+  {% endif %}
 
   <form method="post" action="/journal/add" style="display:flex;flex-direction:column;gap:12px;">
     <div class="form-grid-4">

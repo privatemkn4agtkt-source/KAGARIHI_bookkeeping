@@ -318,6 +318,14 @@ class Bookkeeping(commands.Cog):
                 f"イベント「{イベント}」は登録されていません。`/イベント作成` で先に作成してください。", ephemeral=True
             )
             return
+        if 貸方 in db.CASH_ACCOUNTS:
+            balance = await db.get_account_balance(貸方)
+            if balance - 金額 < 0:
+                await interaction.response.send_message(
+                    f"❌ {貸方}の残高が不足しています。\n現在残高: {fmt_amount(balance)}\n引落予定: {fmt_amount(金額)}",
+                    ephemeral=True,
+                )
+                return
 
         entry_id = await db.add_journal_entry(entry_date, 借方, 貸方, 金額, 摘要, イベント, 消費税率)
 

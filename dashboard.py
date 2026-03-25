@@ -394,7 +394,7 @@ async def email_user_delete(
 # ─────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None)):
+async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None), error_msg: str = Query(default="")):
     await db.record_page_visit("/")
     today = date.today()
     ym = today.strftime("%Y-%m")
@@ -442,6 +442,7 @@ async def index(request: Request, user: dict = Depends(auth_guard), saved: str =
         "events": events,
         "today": today.isoformat(),
         "saved": saved,
+        "error_msg": error_msg,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
@@ -459,6 +460,14 @@ async def journal_add(
     event_tag: str = Form(default=""),
     tax_rate: int = Form(default=0),
 ):
+    if amount <= 0:
+        return RedirectResponse("/?error_msg=金額は1円以上で入力してください", status_code=303)
+    if credit_account in db.CASH_ACCOUNTS:
+        balance = await db.get_account_balance(credit_account)
+        if balance - amount < 0:
+            from urllib.parse import quote
+            msg = quote(f"{credit_account}の残高が不足しています（現在残高: {balance:,}円、引落予定: {amount:,}円）")
+            return RedirectResponse(f"/?error_msg={msg}", status_code=303)
     await db.add_journal_entry(
         entry_date=entry_date,
         debit_account=debit_account,
@@ -906,13 +915,24 @@ async def settle_advance(
     user: dict = Depends(auth_guard),
 ):
     advance = await db.get_advance_by_id(advance_id)
+    if not advance:
+        return RedirectResponse(f"{redirect_to}?error_msg=立替が見つかりません", status_code=303)
+    if credit_account in db.CASH_ACCOUNTS:
+        balance = await db.get_account_balance(credit_account)
+        if balance - advance["amount"] < 0:
+            from urllib.parse import quote
+            msg = quote(f"{credit_account}の残高が不足しています（現在残高: {balance:,}円）")
+            sep = "&" if "?" in redirect_to else "?"
+            return RedirectResponse(f"{redirect_to}{sep}error_msg={msg}", status_code=303)
     success = await db.settle_advance(advance_id)
-    if success and advance:
-        await db.add_journal_entry(
-            settle_date, debit_account, credit_account,
-            advance["amount"],
-            f"【立替#{advance_id:04d}精算】{advance['description']}",
-        )
+    if not success:
+        sep = "&" if "?" in redirect_to else "?"
+        return RedirectResponse(f"{redirect_to}{sep}error_msg=精算処理に失敗しました", status_code=303)
+    await db.add_journal_entry(
+        settle_date, debit_account, credit_account,
+        advance["amount"],
+        f"【立替#{advance_id:04d}精算】{advance['description']}",
+    )
     sep = "&" if "?" in redirect_to else "?"
     return RedirectResponse(f"{redirect_to}{sep}settled=1", status_code=303)
 
