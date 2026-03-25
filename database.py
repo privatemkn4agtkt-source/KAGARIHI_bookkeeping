@@ -789,6 +789,17 @@ async def get_advances(settled: bool = False) -> list[dict]:
             return [dict(r) for r in await cursor.fetchall()]
 
 
+async def get_advance_by_id(advance_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT id, paid_by, amount, description, entry_date FROM advances WHERE id = ?",
+            (advance_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
 async def settle_advance(advance_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as conn:
         cursor = await conn.execute(

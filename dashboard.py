@@ -725,11 +725,13 @@ async def advances_page(request: Request, settled: int = Query(0), user: dict = 
     totals: dict[str, int] = {}
     for a in advances:
         totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
+    accounts = await db.get_accounts()
     return templates.TemplateResponse("advances.html", {
         "request": request, "user": user,
         "advances": advances,
         "totals": sorted(totals.items(), key=lambda x: -x[1]),
         "settled_msg": "精算済みにしました" if settled else "",
+        "accounts": accounts,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
@@ -740,9 +742,19 @@ async def settle_advance(
     advance_id: int,
     request: Request,
     redirect_to: str = Form("/advances"),
+    settle_date: str = Form(...),
+    debit_account: str = Form("未払金"),
+    credit_account: str = Form("現金"),
     user: dict = Depends(auth_guard),
 ):
-    await db.settle_advance(advance_id)
+    advance = await db.get_advance_by_id(advance_id)
+    success = await db.settle_advance(advance_id)
+    if success and advance:
+        await db.add_journal_entry(
+            settle_date, debit_account, credit_account,
+            advance["amount"],
+            f"【立替#{advance_id:04d}精算】{advance['description']}",
+        )
     sep = "&" if "?" in redirect_to else "?"
     return RedirectResponse(f"{redirect_to}{sep}settled=1", status_code=303)
 

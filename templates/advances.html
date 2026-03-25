@@ -44,10 +44,10 @@
         <td class="text-right amount gold">{{ fmt(a.amount) }}</td>
         <td>{{ a.description }}</td>
         <td>
-          <form method="post" action="/advances/{{ a.id }}/settle" onsubmit="return confirm('{{ a.paid_by }} への {{ fmt(a.amount) }} を精算済みにしますか？')">
-            <input type="hidden" name="redirect_to" value="/advances">
-            <button type="submit" class="btn" style="background:var(--green);color:#fff;font-size:12px;padding:4px 12px;">精算</button>
-          </form>
+          <button type="button" class="btn" style="background:var(--green);color:#fff;font-size:12px;padding:4px 12px;"
+            onclick="openSettleModal({{ a.id }}, '{{ a.paid_by | replace("'", "\\'") }}', '{{ fmt(a.amount) }}', '{{ a.description | replace("'", "\\'") }}', '/advances')">
+            精算
+          </button>
         </td>
       </tr>
       {% endfor %}
@@ -60,4 +60,82 @@
   未精算の立替はありません。
 </div>
 {% endif %}
+
+<!-- 精算モーダル -->
+<div id="settleModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;width:min(480px,92vw);position:relative;">
+    <button onclick="closeSettleModal()" style="position:absolute;top:14px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;">✕</button>
+    <h2 style="margin-bottom:16px;">💳 精算処理</h2>
+    <div id="settleInfo" style="background:var(--surface2);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:14px;line-height:1.7;"></div>
+    <form method="post" id="settleForm">
+      <input type="hidden" name="redirect_to" id="settleRedirect" value="/advances">
+      <div style="display:grid;gap:14px;">
+        <div>
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">精算日</label>
+          <input type="date" name="settle_date" id="settleDate" required
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">借方科目</label>
+            <select name="debit_account" id="settleDebit"
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+              {% for a in accounts %}
+              <option value="{{ a.name }}" {% if a.name == '未払金' %}selected{% endif %}>{{ a.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">貸方科目</label>
+            <select name="credit_account" id="settleCredit"
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+              {% for a in accounts %}
+              <option value="{{ a.name }}" {% if a.name == '現金' %}selected{% endif %}>{{ a.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div style="background:var(--surface2);border-radius:6px;padding:10px 14px;font-size:13px;color:var(--muted);">
+          仕訳: <span id="previewDebit" style="color:var(--text);">未払金</span> ／ <span id="previewCredit" style="color:var(--text);">現金</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end;">
+        <button type="button" onclick="closeSettleModal()" class="btn" style="background:var(--surface2);color:var(--text);">キャンセル</button>
+        <button type="submit" class="btn btn-primary">精算する</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  const today = new Date().toISOString().slice(0, 10);
+
+  function openSettleModal(id, paidBy, amount, description, redirectTo) {
+    document.getElementById('settleForm').action = `/advances/${id}/settle`;
+    document.getElementById('settleRedirect').value = redirectTo;
+    document.getElementById('settleDate').value = today;
+    document.getElementById('settleInfo').innerHTML =
+      `<strong>${paidBy}</strong> の立替<br>` +
+      `<span style="color:var(--gold);font-size:18px;font-weight:700;">${amount}</span><br>` +
+      `<span style="color:var(--muted);">${description}</span>`;
+    document.getElementById('settleModal').style.display = 'flex';
+  }
+
+  function closeSettleModal() {
+    document.getElementById('settleModal').style.display = 'none';
+  }
+
+  // 仕訳プレビュー更新
+  document.getElementById('settleDebit').addEventListener('change', e => {
+    document.getElementById('previewDebit').textContent = e.target.value;
+  });
+  document.getElementById('settleCredit').addEventListener('change', e => {
+    document.getElementById('previewCredit').textContent = e.target.value;
+  });
+
+  // モーダル外クリックで閉じる
+  document.getElementById('settleModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('settleModal')) closeSettleModal();
+  });
+</script>
 {% endblock %}
