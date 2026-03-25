@@ -1,5 +1,7 @@
 import aiosqlite
+import hashlib
 import os
+import secrets
 import shutil
 from datetime import date
 
@@ -173,6 +175,15 @@ async def init_db():
                 page TEXT PRIMARY KEY,
                 visit_count INTEGER NOT NULL DEFAULT 0,
                 last_visited TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS local_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
             )
         """)
         # 環境変数 ALLOWED_DISCORD_IDS の初回シード（既存レコードは無視）
@@ -1290,3 +1301,62 @@ async def get_budget_vs_actual(period: str) -> list[dict]:
                 "ratio": ratio,
             })
         return result
+
+
+# =============================================================================
+# メール認証ユーザー
+# =============================================================================
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
+    return salt.hex() + ":" + key.hex()
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        salt_hex, key_hex = stored.split(":")
+        salt = bytes.fromhex(salt_hex)
+        key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
+        return secrets.compare_digest(key.hex(), key_hex)
+    except Exception:
+        return False
+
+
+async def get_local_users() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT id, email, display_name, created_at FROM local_users ORDER BY id"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+async def get_local_user_by_email(email: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(
+            "SELECT * FROM local_users WHERE email = ?", (email.lower(),)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def create_local_user(email: str, password: str, display_name: str) -> tuple[bool, str]:
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            await conn.execute(
+                "INSERT INTO local_users (email, password_hash, display_name) VALUES (?, ?, ?)",
+                (email.lower(), _hash_password(password), display_name),
+            )
+            await conn.commit()
+        return True, ""
+    except aiosqlite.IntegrityError:
+        return False, "そのメールアドレスはすでに登録されています"
+
+
+async def delete_local_user(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cur = await conn.execute("DELETE FROM local_users WHERE id = ?", (user_id,))
+        await conn.commit()
+        return cur.rowcount > 0

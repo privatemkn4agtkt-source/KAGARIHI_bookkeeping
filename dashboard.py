@@ -103,8 +103,9 @@ NAV_SECTIONS = [
             {"path": "/members",      "icon": "👥", "label": "メンバー管理"},
             {"path": "/accounts",     "icon": "📂", "label": "勘定科目一覧"},
             {"path": "/storage",      "icon": "💾", "label": "ストレージ確認"},
-            {"path": "/permissions",  "icon": "🔑", "label": "許可管理"},
-            {"path": "/export/excel", "icon": "📥", "label": "Excelダウンロード"},
+            {"path": "/permissions",        "icon": "🔑", "label": "許可管理"},
+            {"path": "/admin/email-users",  "icon": "✉️",  "label": "メールユーザー"},
+            {"path": "/export/excel",       "icon": "📥", "label": "Excelダウンロード"},
         ],
     },
 ]
@@ -171,7 +172,10 @@ async def auth_guard(request: Request) -> dict:
     if user is None:
         request.session["next"] = str(request.url)
         raise HTTPException(status_code=307, headers={"Location": "/auth/login"})
-    # DBをリクエストごとに参照（再起動なしで許可変更が反映される）
+    # メール認証ユーザーは常に許可（管理者が追加した信頼済みアカウント）
+    if user.get("auth_type") == "email":
+        return user
+    # Discord ユーザーは許可リストを参照
     if not await db.is_allowed_user(user["id"]):
         raise HTTPException(status_code=307, headers={"Location": "/auth/denied"})
     return user
@@ -264,6 +268,26 @@ async def oauth_callback(request: Request, code: str = Query(None), state: str =
     return RedirectResponse(next_url, status_code=302)
 
 
+@app.post("/auth/email-login")
+async def email_login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+):
+    local_user = await db.get_local_user_by_email(email)
+    if not local_user or not db.verify_password(password, local_user["password_hash"]):
+        return RedirectResponse("/auth/login?error=invalid", status_code=303)
+    request.session["user"] = {
+        "id":          f"email:{local_user['email']}",
+        "username":    local_user["email"],
+        "global_name": local_user["display_name"],
+        "avatar":      None,
+        "auth_type":   "email",
+    }
+    next_url = request.session.pop("next", "/")
+    return RedirectResponse(next_url, status_code=302)
+
+
 @app.get("/auth/logout")
 async def logout(request: Request):
     request.session.clear()
@@ -274,6 +298,41 @@ async def logout(request: Request):
 async def denied(request: Request):
     user = get_current_user(request)
     return templates.TemplateResponse("denied.html", {"request": request, "user": user})
+
+
+@app.get("/admin/email-users", response_class=HTMLResponse)
+async def email_users_page(request: Request, msg: str = Query(default=""), ok: int = Query(default=1), user: dict = Depends(auth_guard)):
+    users = await db.get_local_users()
+    return templates.TemplateResponse("email_users.html", {
+        "request": request, "user": user,
+        "local_users": users,
+        "message": msg, "message_ok": ok == 1,
+        "nav_sections": await sorted_nav_sections(),
+    })
+
+
+@app.post("/admin/email-users/add")
+async def email_user_add(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    display_name: str = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    ok, err = await db.create_local_user(email, password, display_name)
+    if ok:
+        return RedirectResponse(f"/admin/email-users?msg={display_name}+を追加しました&ok=1", status_code=303)
+    return RedirectResponse(f"/admin/email-users?msg={err}&ok=0", status_code=303)
+
+
+@app.post("/admin/email-users/{user_id}/delete")
+async def email_user_delete(
+    user_id: int,
+    request: Request,
+    user: dict = Depends(auth_guard),
+):
+    await db.delete_local_user(user_id)
+    return RedirectResponse("/admin/email-users?msg=削除しました&ok=1", status_code=303)
 
 
 # ─────────────────────────────────────────────────────────

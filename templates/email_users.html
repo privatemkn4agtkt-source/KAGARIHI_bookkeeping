@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}メールユーザー管理 – KAGARIHI 会計{% endblock %}
+{% block content %}
+<h1>✉️ メールユーザー管理</h1>
+
+{% if message %}
+<div style="background:{% if message_ok %}#1b3a2b;border:1px solid var(--green);color:var(--green){% else %}#3a1a1a;border:1px solid var(--red);color:var(--red){% endif %};border-radius:8px;padding:10px 16px;margin-bottom:20px;font-size:14px;">
+  {% if message_ok %}✅{% else %}❌{% endif %} {{ message }}
+</div>
+{% endif %}
+
+<!-- 新規追加フォーム -->
+<div class="card" style="margin-bottom:24px;">
+  <h2 style="margin-bottom:16px;">新規ユーザーを追加</h2>
+  <form method="post" action="/admin/email-users/add" style="display:grid;gap:12px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end;">
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">表示名</label>
+        <input type="text" name="display_name" placeholder="例: 田中" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">メールアドレス</label>
+        <input type="email" name="email" placeholder="you@example.com" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">パスワード</label>
+        <input type="password" name="password" placeholder="8文字以上" minlength="8" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary" style="white-space:nowrap;">追加する</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- ユーザー一覧 -->
+<div class="card">
+  <h2 style="margin-bottom:16px;">登録ユーザー（{{ local_users|length }} 名）</h2>
+  {% if local_users %}
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>表示名</th>
+        <th>メールアドレス</th>
+        <th>登録日時</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in local_users %}
+      <tr>
+        <td style="color:var(--muted);font-size:12px;">{{ u.id }}</td>
+        <td><strong>{{ u.display_name }}</strong></td>
+        <td style="color:var(--muted);">{{ u.email }}</td>
+        <td style="color:var(--muted);font-size:12px;">{{ u.created_at }}</td>
+        <td>
+          <form method="post" action="/admin/email-users/{{ u.id }}/delete" style="display:inline;"
+            onsubmit="return confirm('{{ u.display_name }}（{{ u.email }}）を削除しますか？')">
+            <button type="submit" class="btn" style="font-size:12px;padding:3px 10px;background:var(--red);color:#fff;">削除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div style="color:var(--muted);padding:24px;text-align:center;">登録されたメールユーザーはいません。</div>
+  {% endif %}
+  <div style="color:var(--muted);font-size:12px;margin-top:16px;">
+    メールユーザーはダッシュボードの閲覧のみ可能です。Discord の許可リストとは独立して管理されます。
+  </div>
+</div>
+{% endblock %}
