@@ -65,6 +65,15 @@ NAV_SECTIONS = [
         ],
     },
     {
+        "label": "明細",
+        "items": [
+            {"path": "/journal",   "icon": "📒", "label": "仕訳帳"},
+            {"path": "/events",    "icon": "🎸", "label": "ライブ収支"},
+            {"path": "/advances",  "icon": "💳", "label": "立替精算表"},
+            {"path": "/goods",     "icon": "📦", "label": "グッズ在庫"},
+        ],
+    },
+    {
         "label": "財務諸表",
         "items": [
             {"path": "/pl",        "icon": "📊", "label": "損益計算書"},
@@ -80,15 +89,6 @@ NAV_SECTIONS = [
         "items": [
             {"path": "/monthly", "icon": "📅", "label": "月次収支"},
             {"path": "/yearly",  "icon": "📆", "label": "年次集計"},
-        ],
-    },
-    {
-        "label": "明細",
-        "items": [
-            {"path": "/journal",   "icon": "📒", "label": "仕訳帳"},
-            {"path": "/events",    "icon": "🎸", "label": "ライブ収支"},
-            {"path": "/advances",  "icon": "💳", "label": "立替精算表"},
-            {"path": "/goods",     "icon": "📦", "label": "グッズ在庫"},
         ],
     },
     {
