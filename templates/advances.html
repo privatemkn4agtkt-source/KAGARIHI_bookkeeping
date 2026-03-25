@@ -14,9 +14,16 @@
 </div>
 {% endif %}
 
+{% if settled_msg %}
+<div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
+  ✅ {{ settled_msg }}
+</div>
+{% endif %}
+
 {% if advances %}
 <div class="card">
   <h2>未精算一覧（{{ advances|length }} 件）</h2>
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
@@ -25,6 +32,7 @@
         <th>メンバー</th>
         <th class="text-right">金額</th>
         <th>摘要</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -35,10 +43,17 @@
         <td><strong>{{ a.paid_by }}</strong></td>
         <td class="text-right amount gold">{{ fmt(a.amount) }}</td>
         <td>{{ a.description }}</td>
+        <td>
+          <form method="post" action="/advances/{{ a.id }}/settle" onsubmit="return confirm('{{ a.paid_by }} への {{ fmt(a.amount) }} を精算済みにしますか？')">
+            <input type="hidden" name="redirect_to" value="/advances">
+            <button type="submit" class="btn" style="background:var(--green);color:#fff;font-size:12px;padding:4px 12px;">精算</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% else %}
 <div class="card" style="color:var(--muted);text-align:center;padding:40px;">

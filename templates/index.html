@@ -103,6 +103,7 @@
         <th>立替者</th>
         <th>内容</th>
         <th class="text-right">金額</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -113,12 +114,18 @@
         <td><span class="badge badge-asset">{{ a.paid_by }}</span></td>
         <td>{{ a.description }}</td>
         <td class="text-right amount neutral">{{ fmt(a.amount) }}</td>
+        <td>
+          <form method="post" action="/advances/{{ a.id }}/settle" onsubmit="return confirm('{{ a.paid_by }} への {{ fmt(a.amount) }} を精算済みにしますか？')">
+            <input type="hidden" name="redirect_to" value="/">
+            <button type="submit" class="btn" style="background:var(--green);color:#fff;font-size:12px;padding:4px 12px;">精算</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr class="total-row">
-        <td colspan="4" class="text-right">合計</td>
+        <td colspan="5" class="text-right">合計</td>
         <td class="text-right amount neutral">{{ fmt(unsettled_advances|sum(attribute='amount')) }}</td>
       </tr>
     </tfoot>

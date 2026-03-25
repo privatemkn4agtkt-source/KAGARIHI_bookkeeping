@@ -719,7 +719,7 @@ async def cashflow_page(
 
 
 @app.get("/advances", response_class=HTMLResponse)
-async def advances_page(request: Request, user: dict = Depends(auth_guard)):
+async def advances_page(request: Request, settled: int = Query(0), user: dict = Depends(auth_guard)):
     await db.record_page_visit("/advances")
     advances = await db.get_advances(settled=False)
     totals: dict[str, int] = {}
@@ -729,9 +729,22 @@ async def advances_page(request: Request, user: dict = Depends(auth_guard)):
         "request": request, "user": user,
         "advances": advances,
         "totals": sorted(totals.items(), key=lambda x: -x[1]),
+        "settled_msg": "精算済みにしました" if settled else "",
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.post("/advances/{advance_id}/settle")
+async def settle_advance(
+    advance_id: int,
+    request: Request,
+    redirect_to: str = Form("/advances"),
+    user: dict = Depends(auth_guard),
+):
+    await db.settle_advance(advance_id)
+    sep = "&" if "?" in redirect_to else "?"
+    return RedirectResponse(f"{redirect_to}{sep}settled=1", status_code=303)
 
 
 @app.get("/accounts", response_class=HTMLResponse)
