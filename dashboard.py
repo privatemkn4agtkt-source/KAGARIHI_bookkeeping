@@ -460,7 +460,7 @@ async def journal_add(
     event_tag: str = Form(default=""),
     tax_rate: int = Form(default=0),
 ):
-    if amount <= 0:
+    if amount < 0 or (amount == 0 and debit_account != "グッズ在庫"):
         return RedirectResponse("/?error_msg=金額は1円以上で入力してください", status_code=303)
     if credit_account in db.CASH_ACCOUNTS:
         balance = await db.get_account_balance(credit_account)
