@@ -77,6 +77,35 @@
       text-transform: uppercase;
       letter-spacing: .08em;
     }
+    nav .section-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px 6px;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      cursor: pointer;
+      background: none;
+      border: none;
+      width: 100%;
+      text-align: left;
+      transition: color .15s;
+    }
+    nav .section-toggle:hover { color: var(--text); }
+    nav .section-toggle .chevron {
+      font-style: normal;
+      transition: transform .2s;
+      display: inline-block;
+    }
+    nav .section-toggle.open .chevron { transform: rotate(180deg); }
+    nav .nav-items {
+      overflow: hidden;
+      max-height: 0;
+      transition: max-height .25s ease;
+    }
+    nav .nav-items.open { max-height: 400px; }
     nav .user-area {
       flex-shrink: 0;
       padding: 16px 20px;
@@ -253,10 +282,24 @@
         <span>🎸</span>KAGARIHI 会計
       </div>
       {% for section in nav_sections %}
+      {% set always_open = section.label in ['概要', '明細'] %}
+      {% set has_active = namespace(found=false) %}
+      {% for item in section.items %}{% if request.url.path == item.path %}{% set has_active.found = true %}{% endif %}{% endfor %}
+      {% if always_open %}
       <div class="section-label">{{ section.label }}</div>
-      {% for item in section['items'] %}
+      {% for item in section.items %}
       <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
       {% endfor %}
+      {% else %}
+      <button class="section-toggle{{ ' open' if has_active.found }}" data-key="nav-{{ section.label }}">
+        {{ section.label }}<i class="chevron">▾</i>
+      </button>
+      <div class="nav-items{{ ' open' if has_active.found }}">
+        {% for item in section.items %}
+        <a href="{{ item.path }}" {% if request.url.path == item.path %}class="active"{% endif %}>{{ item.icon }} {{ item.label }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% endfor %}
     </div>
 
@@ -280,5 +323,21 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+<script>
+  document.querySelectorAll('.section-toggle').forEach(btn => {
+    const key = btn.dataset.key;
+    const items = btn.nextElementSibling;
+    // アクティブページを含まないセクションのみ localStorage を参照
+    if (!btn.classList.contains('open') && localStorage.getItem(key) === 'open') {
+      btn.classList.add('open');
+      items.classList.add('open');
+    }
+    btn.addEventListener('click', () => {
+      const isOpen = btn.classList.toggle('open');
+      items.classList.toggle('open', isOpen);
+      localStorage.setItem(key, isOpen ? 'open' : 'closed');
+    });
+  });
+</script>
 </body>
 </html>
