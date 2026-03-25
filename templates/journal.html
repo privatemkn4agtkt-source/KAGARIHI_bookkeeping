@@ -17,7 +17,19 @@
   <button class="btn btn-primary" type="submit">絞り込み</button>
 </form>
 
+{% if deleted %}
+<div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
+  ✅ 仕訳を削除しました
+</div>
+{% endif %}
+{% if updated %}
+<div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
+  ✅ 仕訳を更新しました
+</div>
+{% endif %}
+
 <div class="card">
+  <div class="table-scroll">
   <table>
     <thead>
       <tr>
@@ -26,9 +38,9 @@
         <th>借方</th>
         <th>貸方</th>
         <th class="text-right">金額</th>
-        <th>消費税</th>
         <th>摘要</th>
         <th>イベント</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -39,16 +51,25 @@
         <td><span class="badge badge-exp">借</span> {{ e.debit_account }}</td>
         <td><span class="badge badge-rev">貸</span> {{ e.credit_account }}</td>
         <td class="text-right amount neutral">{{ fmt(e.amount) }}</td>
-        <td class="text-center">
-          {% if e.tax_rate > 0 %}
-            <span class="badge" style="background:#2a2a1a;color:var(--gold);">{{ e.tax_rate }}%</span>
-          {% else %}
-            <span style="color:var(--muted);font-size:12px;">—</span>
-          {% endif %}
-        </td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.description }}</td>
         <td>
           {% if e.event_tag %}<span class="tag event">🎸 {{ e.event_tag }}</span>{% endif %}
+        </td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="btn" style="font-size:12px;padding:3px 10px;background:var(--surface2);color:var(--text);margin-right:4px;"
+            onclick="openEditModal(
+              {{ e.id }},
+              '{{ e.entry_date }}',
+              '{{ e.debit_account | replace("'","\\'")|replace('"','\\"') }}',
+              '{{ e.credit_account | replace("'","\\'")|replace('"','\\"') }}',
+              {{ e.amount }},
+              '{{ e.description | replace("'","\\'")|replace('"','\\"') }}',
+              '{{ e.event_tag or "" }}'
+            )">編集</button>
+          <form method="post" action="/journal/{{ e.id }}/delete" style="display:inline;"
+            onsubmit="return confirm('#{{ '%04d' % e.id }} を削除しますか？\nこの操作は元に戻せません。')">
+            <button type="submit" class="btn" style="font-size:12px;padding:3px 10px;background:var(--red);color:#fff;">削除</button>
+          </form>
         </td>
       </tr>
       {% else %}
@@ -56,5 +77,94 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
+
+<!-- 編集モーダル -->
+<div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;width:min(520px,92vw);position:relative;">
+    <button onclick="closeEditModal()" style="position:absolute;top:14px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;">✕</button>
+    <h2 style="margin-bottom:20px;">✏️ 仕訳を編集 <span id="editIdLabel" style="font-size:14px;color:var(--muted);font-weight:normal;"></span></h2>
+    <form method="post" id="editForm">
+      <div style="display:grid;gap:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
+            <input type="date" name="entry_date" id="editDate" required
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">金額（円）</label>
+            <input type="number" name="amount" id="editAmount" min="1" required
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">借方科目</label>
+            <select name="debit_account" id="editDebit"
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+              {% for a in accounts %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">貸方科目</label>
+            <select name="credit_account" id="editCredit"
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+              {% for a in accounts %}<option value="{{ a.name }}">{{ a.name }}（{{ a.account_type }}）</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">摘要</label>
+          <input type="text" name="description" id="editDescription"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">イベントタグ</label>
+          <select name="event_tag" id="editEventTag"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+            <option value="">なし</option>
+            {% for e in entries | map(attribute='event_tag') | select | unique | sort %}
+            <option value="{{ e }}">🎸 {{ e }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end;">
+        <button type="button" onclick="closeEditModal()" class="btn" style="background:var(--surface2);color:var(--text);">キャンセル</button>
+        <button type="submit" class="btn btn-primary">保存する</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openEditModal(id, date, debit, credit, amount, description, eventTag) {
+    document.getElementById('editForm').action = `/journal/${id}/update`;
+    document.getElementById('editIdLabel').textContent = `#${String(id).padStart(4,'0')}`;
+    document.getElementById('editDate').value = date;
+    document.getElementById('editAmount').value = amount;
+    document.getElementById('editDescription').value = description;
+
+    const debitSel = document.getElementById('editDebit');
+    for (const opt of debitSel.options) opt.selected = (opt.value === debit);
+
+    const creditSel = document.getElementById('editCredit');
+    for (const opt of creditSel.options) opt.selected = (opt.value === credit);
+
+    const tagSel = document.getElementById('editEventTag');
+    for (const opt of tagSel.options) opt.selected = (opt.value === eventTag);
+
+    document.getElementById('editModal').style.display = 'flex';
+  }
+
+  function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+  }
+
+  document.getElementById('editModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('editModal')) closeEditModal();
+  });
+</script>
 {% endblock %}

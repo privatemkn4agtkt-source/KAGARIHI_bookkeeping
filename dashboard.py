@@ -428,6 +428,7 @@ async def journal(
     request: Request,
     start: str = Query(default=None), end: str = Query(default=None),
     account: str = Query(default=None), limit: int = Query(default=50),
+    deleted: int = Query(default=0), updated: int = Query(default=0),
     user: dict = Depends(auth_guard),
 ):
     await db.record_page_visit("/journal")
@@ -439,8 +440,38 @@ async def journal(
         "entries": entries, "accounts": accounts,
         "start": start or "", "end": end or "",
         "account": account or "", "limit": limit, "fmt": fmt,
+        "deleted": deleted, "updated": updated,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.post("/journal/{entry_id}/delete")
+async def journal_delete(
+    entry_id: int,
+    request: Request,
+    user: dict = Depends(auth_guard),
+):
+    await db.delete_journal_entry(entry_id)
+    return RedirectResponse("/journal?deleted=1", status_code=303)
+
+
+@app.post("/journal/{entry_id}/update")
+async def journal_update(
+    entry_id: int,
+    request: Request,
+    entry_date: str = Form(...),
+    debit_account: str = Form(...),
+    credit_account: str = Form(...),
+    amount: int = Form(...),
+    description: str = Form(default=""),
+    event_tag: str = Form(default=""),
+    user: dict = Depends(auth_guard),
+):
+    await db.update_journal_entry(
+        entry_id, entry_date, debit_account, credit_account,
+        amount, description, event_tag or None,
+    )
+    return RedirectResponse("/journal?updated=1", status_code=303)
 
 
 @app.get("/events", response_class=HTMLResponse)
