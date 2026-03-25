@@ -202,32 +202,6 @@
   </div>
 </div>
 
-<!-- 税関連残高 -->
-<div class="card">
-  <h2>💴 税関連残高</h2>
-  <div class="grid grid-3">
-    {% set genzei = tax_balances.get('源泉徴収預かり金', 0) %}
-    {% set kariuke = tax_balances.get('仮受消費税', 0) %}
-    {% set karihara = tax_balances.get('仮払消費税', 0) %}
-    {% set net_tax = kariuke - karihara %}
-    <div>
-      <div class="card-title">源泉徴収預かり金</div>
-      <div style="font-size:20px;font-weight:700;color:var(--gold);">{{ fmt(genzei) }}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px;">納付待ち金額</div>
-    </div>
-    <div>
-      <div class="card-title">消費税（仮受 − 仮払）</div>
-      <div style="font-size:20px;font-weight:700;color:{{ 'var(--red)' if net_tax > 0 else 'var(--green)' }};">{{ fmt(net_tax) }}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px;">仮受 {{ fmt(kariuke) }} / 仮払 {{ fmt(karihara) }}</div>
-    </div>
-    <div>
-      <div class="card-title">詳細</div>
-      <div style="font-size:13px;color:var(--muted);margin-top:4px;">
-        <a href="/tax" style="color:var(--accent2);text-decoration:none;">→ 消費税サマリーを見る</a>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- 精算モーダル（ダッシュボード用） -->
 <div id="settleModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;align-items:center;justify-content:center;">

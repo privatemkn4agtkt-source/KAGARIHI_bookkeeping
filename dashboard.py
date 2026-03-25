@@ -94,7 +94,6 @@ NAV_SECTIONS = [
     {
         "label": "税務",
         "items": [
-            {"path": "/tax",       "icon": "🧾", "label": "消費税サマリー"},
             {"path": "/taxreturn", "icon": "📋", "label": "確定申告サマリー"},
         ],
     },
