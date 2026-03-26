@@ -886,22 +886,57 @@ async def cashflow_page(
 
 
 @app.get("/advances", response_class=HTMLResponse)
-async def advances_page(request: Request, settled: int = Query(0), user: dict = Depends(auth_guard)):
+async def advances_page(
+    request: Request,
+    settled: int = Query(0),
+    added: int = Query(0),
+    error_msg: str = Query(default=""),
+    user: dict = Depends(auth_guard),
+):
     await db.record_page_visit("/advances")
     advances = await db.get_advances(settled=False)
     totals: dict[str, int] = {}
     for a in advances:
         totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
     accounts = await db.get_accounts()
+    members = await db.get_members()
+    flash_msg = ""
+    flash_ok = True
+    if settled:
+        flash_msg = "精算済みにしました"
+    elif added:
+        flash_msg = "立替を登録しました"
+    elif error_msg:
+        flash_msg = error_msg
+        flash_ok = False
     return templates.TemplateResponse("advances.html", {
         "request": request, "user": user,
         "advances": advances,
         "totals": sorted(totals.items(), key=lambda x: -x[1]),
-        "settled_msg": "精算済みにしました" if settled else "",
+        "flash_msg": flash_msg,
+        "flash_ok": flash_ok,
         "accounts": accounts,
+        "members": members,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.post("/advances/add")
+async def advance_add(
+    request: Request,
+    paid_by: str = Form(...),
+    amount: int = Form(...),
+    description: str = Form(...),
+    entry_date: str = Form(...),
+    user: dict = Depends(auth_guard),
+):
+    from urllib.parse import quote
+    if amount <= 0:
+        msg = quote("金額は1円以上で入力してください")
+        return RedirectResponse(f"/advances?error_msg={msg}", status_code=303)
+    await db.add_advance(paid_by=paid_by, amount=amount, description=description, entry_date=entry_date)
+    return RedirectResponse("/advances?added=1", status_code=303)
 
 
 @app.post("/advances/{advance_id}/settle")
