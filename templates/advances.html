@@ -20,42 +20,6 @@
 </div>
 {% endif %}
 
-<!-- 立替登録フォーム -->
-<div class="card" style="margin-bottom:24px;">
-  <h2 style="margin-bottom:16px;">💳 立替を登録</h2>
-  <form method="post" action="/advances/add" style="display:grid;gap:12px;">
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:12px;align-items:end;">
-      <div>
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
-        <input type="date" name="entry_date" required id="advanceDate"
-          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-      </div>
-      <div>
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">立替者</label>
-        <select name="paid_by" required
-          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-          {% for m in members %}
-          <option value="{{ m.name }}">{{ m.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">金額（円）</label>
-        <input type="number" name="amount" min="1" required
-          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-      </div>
-      <div>
-        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">摘要</label>
-        <input type="text" name="description" required placeholder="例: スタジオ代"
-          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
-      </div>
-      <div>
-        <button type="submit" class="btn btn-primary" style="white-space:nowrap;">登録する</button>
-      </div>
-    </div>
-  </form>
-</div>
-
 {% if advances %}
 <div class="card">
   <h2>未精算一覧（{{ advances|length }} 件）</h2>
@@ -145,7 +109,6 @@
 
 <script>
   const today = new Date().toISOString().slice(0, 10);
-  document.getElementById('advanceDate').value = today;
 
   function openSettleModal(id, paidBy, amount, description, redirectTo) {
     document.getElementById('settleForm').action = `/advances/${id}/settle`;

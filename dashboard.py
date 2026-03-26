@@ -394,7 +394,7 @@ async def email_user_delete(
 # ─────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None), error_msg: str = Query(default="")):
+async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None), added: int = Query(0), error_msg: str = Query(default="")):
     await db.record_page_visit("/")
     today = date.today()
     ym = today.strftime("%Y-%m")
@@ -440,8 +440,10 @@ async def index(request: Request, user: dict = Depends(auth_guard), saved: str =
         "accounts_common": accounts_common,
         "accounts_other": accounts_other,
         "events": events,
+        "members": members,
         "today": today.isoformat(),
         "saved": saved,
+        "added": added,
         "error_msg": error_msg,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
@@ -889,7 +891,6 @@ async def cashflow_page(
 async def advances_page(
     request: Request,
     settled: int = Query(0),
-    added: int = Query(0),
     error_msg: str = Query(default=""),
     user: dict = Depends(auth_guard),
 ):
@@ -899,13 +900,10 @@ async def advances_page(
     for a in advances:
         totals[a["paid_by"]] = totals.get(a["paid_by"], 0) + a["amount"]
     accounts = await db.get_accounts()
-    members = await db.get_members()
     flash_msg = ""
     flash_ok = True
     if settled:
         flash_msg = "精算済みにしました"
-    elif added:
-        flash_msg = "立替を登録しました"
     elif error_msg:
         flash_msg = error_msg
         flash_ok = False
@@ -916,7 +914,6 @@ async def advances_page(
         "flash_msg": flash_msg,
         "flash_ok": flash_ok,
         "accounts": accounts,
-        "members": members,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
@@ -934,9 +931,9 @@ async def advance_add(
     from urllib.parse import quote
     if amount <= 0:
         msg = quote("金額は1円以上で入力してください")
-        return RedirectResponse(f"/advances?error_msg={msg}", status_code=303)
+        return RedirectResponse(f"/?error_msg={msg}", status_code=303)
     await db.add_advance(paid_by=paid_by, amount=amount, description=description, entry_date=entry_date)
-    return RedirectResponse("/advances?added=1", status_code=303)
+    return RedirectResponse("/?added=1", status_code=303)
 
 
 @app.post("/advances/{advance_id}/settle")

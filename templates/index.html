@@ -11,8 +11,11 @@
   <div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
     ✅ 仕訳を登録しました
   </div>
-  {% endif %}
-  {% if error_msg %}
+  {% elif added %}
+  <div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
+    ✅ 立替を登録しました
+  </div>
+  {% elif error_msg %}
   <div style="background:#3a1a1a;border:1px solid var(--red);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--red);font-size:14px;">
     ❌ {{ error_msg }}
   </div>
@@ -74,6 +77,42 @@
       <div>
         <button type="submit" class="btn btn-primary" style="padding:8px 24px;white-space:nowrap;">登録する</button>
       </div>
+    </div>
+  </form>
+</div>
+
+<!-- 立替登録フォーム -->
+<div class="card" style="margin-bottom:24px;">
+  <h2 style="margin-bottom:16px;">💴 立替を登録</h2>
+  <form method="post" action="/advances/add" style="display:grid;gap:12px;">
+    <div class="form-grid-4">
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
+        <input type="date" name="entry_date" value="{{ today }}" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">立替者</label>
+        <select name="paid_by" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+          {% for m in members %}
+          <option value="{{ m.name }}">{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">金額（円）</label>
+        <input type="number" name="amount" min="1" placeholder="例: 5000" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">摘要</label>
+        <input type="text" name="description" required placeholder="例: スタジオ代"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;">
+      <button type="submit" class="btn btn-primary" style="padding:8px 24px;">登録する</button>
     </div>
   </form>
 </div>
@@ -142,7 +181,7 @@
   {% endif %}
 
   <div style="color:var(--muted);font-size:12px;margin-top:12px;">
-    記録・精算は Discord の <code>/立替記録</code>・<code>/立替精算</code> で行えます
+    精算は Discord の <code>/立替精算</code> またはボタンから行えます
   </div>
 </div>
 
