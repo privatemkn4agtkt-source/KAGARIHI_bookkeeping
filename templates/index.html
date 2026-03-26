@@ -15,6 +15,14 @@
   <div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
     ✅ 立替を登録しました
   </div>
+  {% elif goods_saved == 'purchased' %}
+  <div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
+    ✅ グッズ仕入を登録しました
+  </div>
+  {% elif goods_saved == 'sold' %}
+  <div style="background:#1b3a2b;border:1px solid var(--green);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--green);font-size:14px;">
+    ✅ グッズ販売を登録しました
+  </div>
   {% elif error_msg %}
   <div style="background:#3a1a1a;border:1px solid var(--red);border-radius:8px;padding:10px 16px;margin-bottom:16px;color:var(--red);font-size:14px;">
     ❌ {{ error_msg }}
@@ -185,6 +193,113 @@
   </div>
 </div>
 
+<!-- グッズ 仕入・販売 -->
+<div class="card" style="margin-bottom:24px;">
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
+    <h2 style="margin:0;">📦 グッズ 仕入・販売</h2>
+    <!-- タブ -->
+    <div style="display:flex;gap:4px;background:var(--surface2);border-radius:8px;padding:3px;">
+      <button type="button" id="tab-purchase" onclick="switchGoodsTab('purchase')"
+        style="padding:5px 14px;border-radius:6px;border:none;cursor:pointer;font-size:13px;background:var(--green);color:#fff;font-weight:600;">📥 仕入</button>
+      <button type="button" id="tab-sale" onclick="switchGoodsTab('sale')"
+        style="padding:5px 14px;border-radius:6px;border:none;cursor:pointer;font-size:13px;background:transparent;color:var(--muted);">💰 販売</button>
+    </div>
+  </div>
+
+  {% if goods_list %}
+  <!-- 在庫サマリー（小） -->
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+    {% for g in goods_list %}
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:13px;">
+      <span style="color:var(--muted);">{{ g.name }}</span>
+      <span style="font-weight:700;color:{{ 'var(--green)' if g.stock > 0 else 'var(--red)' }};margin-left:8px;">{{ g.stock }} 個</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- 仕入フォーム -->
+  <form id="form-purchase" method="post" action="/goods/purchase" style="display:grid;gap:12px;">
+    <div class="form-grid-4">
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
+        <input type="date" name="entry_date" value="{{ today }}" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">グッズ</label>
+        <select name="goods_name" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+          {% for g in goods_list %}<option value="{{ g.name }}">{{ g.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">数量</label>
+        <input type="number" name="quantity" min="1" placeholder="例: 50" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">仕入単価（円）</label>
+        <input type="number" name="unit_price" min="0" placeholder="例: 300" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">摘要（任意）</label>
+        <input type="text" name="description" placeholder="例: ライブグッズ仕入"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div style="display:flex;align-items:flex-end;">
+        <button type="submit" class="btn btn-primary" style="padding:8px 24px;white-space:nowrap;">仕入登録</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- 販売フォーム -->
+  <form id="form-sale" method="post" action="/goods/sale" style="display:none;gap:12px;">
+    <div class="form-grid-4">
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
+        <input type="date" name="entry_date" value="{{ today }}" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">グッズ</label>
+        <select name="goods_name" id="saleGoodsSelect" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;"
+          onchange="updateSalePrice(this.value)">
+          {% for g in goods_list %}<option value="{{ g.name }}" data-price="{{ g.selling_price }}">{{ g.name }}（在庫{{ g.stock }}個）</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">数量</label>
+        <input type="number" name="quantity" min="1" placeholder="例: 3" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">販売単価（円）</label>
+        <input type="number" name="unit_price" id="salePriceInput" min="1" required
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">摘要（任意）</label>
+        <input type="text" name="description" placeholder="例: ライブ物販"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
+      </div>
+      <div style="display:flex;align-items:flex-end;">
+        <button type="submit" class="btn btn-primary" style="padding:8px 24px;white-space:nowrap;background:var(--gold);color:#000;">販売登録</button>
+      </div>
+    </div>
+  </form>
+
+  {% if not goods_list %}
+  <div style="color:var(--muted);font-size:13px;margin-top:4px;">グッズが登録されていません。<a href="/goods" style="color:var(--accent);">グッズ在庫ページ</a>から登録してください。</div>
+  {% endif %}
+</div>
+
 <!-- KPI カード -->
 <div class="grid grid-4" style="margin-bottom:24px;">
   <div class="card">
@@ -280,6 +395,34 @@
 </div>
 
 <script>
+  // ── グッズタブ ──
+  function switchGoodsTab(tab) {
+    const isPurchase = tab === 'purchase';
+    document.getElementById('form-purchase').style.display = isPurchase ? 'grid' : 'none';
+    document.getElementById('form-sale').style.display = isPurchase ? 'none' : 'grid';
+    document.getElementById('tab-purchase').style.background = isPurchase ? 'var(--green)' : 'transparent';
+    document.getElementById('tab-purchase').style.color = isPurchase ? '#fff' : 'var(--muted)';
+    document.getElementById('tab-purchase').style.fontWeight = isPurchase ? '600' : 'normal';
+    document.getElementById('tab-sale').style.background = isPurchase ? 'transparent' : 'var(--gold)';
+    document.getElementById('tab-sale').style.color = isPurchase ? 'var(--muted)' : '#000';
+    document.getElementById('tab-sale').style.fontWeight = isPurchase ? 'normal' : '600';
+  }
+
+  function updateSalePrice(goodsName) {
+    const sel = document.getElementById('saleGoodsSelect');
+    const opt = sel.querySelector(`option[value="${CSS.escape(goodsName)}"]`);
+    if (opt) document.getElementById('salePriceInput').value = opt.dataset.price;
+  }
+
+  // 販売単価を初期化
+  const saleGoodsSel = document.getElementById('saleGoodsSelect');
+  if (saleGoodsSel && saleGoodsSel.options.length > 0) {
+    document.getElementById('salePriceInput').value = saleGoodsSel.options[0].dataset.price || '';
+  }
+
+  // goods_saved=sold のとき販売タブを開く
+  {% if goods_saved == 'sold' %}switchGoodsTab('sale');{% endif %}
+
   // ── 精算モーダル ──
   const today = new Date().toISOString().slice(0, 10);
 

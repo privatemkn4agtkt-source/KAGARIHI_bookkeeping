@@ -394,7 +394,7 @@ async def email_user_delete(
 # ─────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None), added: int = Query(0), error_msg: str = Query(default="")):
+async def index(request: Request, user: dict = Depends(auth_guard), saved: str = Query(default=None), added: int = Query(0), goods_saved: str = Query(default=""), error_msg: str = Query(default="")):
     await db.record_page_visit("/")
     today = date.today()
     ym = today.strftime("%Y-%m")
@@ -441,9 +441,11 @@ async def index(request: Request, user: dict = Depends(auth_guard), saved: str =
         "accounts_other": accounts_other,
         "events": events,
         "members": members,
+        "goods_list": goods_list,
         "today": today.isoformat(),
         "saved": saved,
         "added": added,
+        "goods_saved": goods_saved,
         "error_msg": error_msg,
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
@@ -636,6 +638,72 @@ async def goods_page(request: Request, goods_name: str = Query(default=None), us
         "fmt": fmt,
         "nav_sections": await sorted_nav_sections(),
     })
+
+
+@app.post("/goods/purchase")
+async def goods_purchase(
+    request: Request,
+    entry_date: str = Form(...),
+    goods_name: str = Form(...),
+    quantity: int = Form(...),
+    unit_price: int = Form(...),
+    description: str = Form(default=""),
+    user: dict = Depends(auth_guard),
+):
+    from urllib.parse import quote
+    if quantity <= 0 or unit_price < 0:
+        msg = quote("数量は1以上、単価は0以上で入力してください")
+        return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+    total = quantity * unit_price
+    journal_id = await db.add_journal_entry(
+        entry_date, "グッズ在庫", "現金",
+        total,
+        description or f"グッズ仕入: {goods_name} {quantity}個",
+    )
+    await db.record_goods_purchase(
+        goods_name=goods_name,
+        quantity=quantity,
+        unit_price=unit_price,
+        entry_date=entry_date,
+        description=description or f"グッズ仕入: {goods_name} {quantity}個",
+        journal_entry_id=journal_id,
+    )
+    return RedirectResponse("/?goods_saved=purchased", status_code=303)
+
+
+@app.post("/goods/sale")
+async def goods_sale(
+    request: Request,
+    entry_date: str = Form(...),
+    goods_name: str = Form(...),
+    quantity: int = Form(...),
+    unit_price: int = Form(...),
+    description: str = Form(default=""),
+    user: dict = Depends(auth_guard),
+):
+    from urllib.parse import quote
+    if quantity <= 0 or unit_price <= 0:
+        msg = quote("数量・単価は1以上で入力してください")
+        return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+    # 在庫チェックは record_goods_sale 内で行う
+    total = quantity * unit_price
+    journal_id = await db.add_journal_entry(
+        entry_date, "現金", "グッズ売上",
+        total,
+        description or f"グッズ販売: {goods_name} {quantity}個",
+    )
+    tx_id, err = await db.record_goods_sale(
+        goods_name=goods_name,
+        quantity=quantity,
+        unit_price=unit_price,
+        entry_date=entry_date,
+        description=description or f"グッズ販売: {goods_name} {quantity}個",
+        journal_entry_id=journal_id,
+    )
+    if err:
+        msg = quote(err)
+        return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+    return RedirectResponse("/?goods_saved=sold", status_code=303)
 
 
 @app.get("/tax", response_class=HTMLResponse)
