@@ -220,18 +220,33 @@
 
   <!-- 仕入フォーム -->
   <form id="form-purchase" method="post" action="/goods/purchase" style="display:grid;gap:12px;">
+    <input type="hidden" name="is_new" id="purchaseIsNew" value="">
+    <!-- 既存/新規トグル -->
+    <div style="display:flex;gap:4px;background:var(--surface2);border-radius:8px;padding:3px;width:fit-content;">
+      <button type="button" id="mode-existing" onclick="switchPurchaseMode('existing')"
+        style="padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px;background:var(--accent);color:#fff;font-weight:600;">既存グッズ</button>
+      <button type="button" id="mode-new" onclick="switchPurchaseMode('new')"
+        style="padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px;background:transparent;color:var(--muted);">＋ 新規登録</button>
+    </div>
     <div class="form-grid-4">
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">日付</label>
         <input type="date" name="entry_date" value="{{ today }}" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
       </div>
-      <div>
+      <!-- 既存グッズ選択 -->
+      <div id="field-existing">
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">グッズ</label>
-        <select name="goods_name" required
+        <select name="goods_name" id="goodsSelect"
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
           {% for g in goods_list %}<option value="{{ g.name }}">{{ g.name }}</option>{% endfor %}
         </select>
+      </div>
+      <!-- 新規グッズ入力（初期非表示） -->
+      <div id="field-new-name" style="display:none;">
+        <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">グッズ名（新規）</label>
+        <input type="text" name="new_goods_name" id="newGoodsName" placeholder="例: ステッカー"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
       </div>
       <div>
         <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">数量</label>
@@ -243,6 +258,12 @@
         <input type="number" name="unit_price" min="0" placeholder="例: 300" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
       </div>
+    </div>
+    <!-- 新規グッズ時の販売単価 -->
+    <div id="field-selling-price" style="display:none;">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">販売単価（円）— 新規グッズに設定する定価</label>
+      <input type="number" name="selling_price" id="sellingPrice" min="0" placeholder="例: 500"
+        style="width:300px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
     </div>
     <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
       <div>
@@ -395,6 +416,24 @@
 </div>
 
 <script>
+  // ── 仕入モード切り替え（既存/新規） ──
+  function switchPurchaseMode(mode) {
+    const isNew = mode === 'new';
+    document.getElementById('purchaseIsNew').value = isNew ? '1' : '';
+    document.getElementById('field-existing').style.display = isNew ? 'none' : '';
+    document.getElementById('field-new-name').style.display = isNew ? '' : 'none';
+    document.getElementById('field-selling-price').style.display = isNew ? '' : 'none';
+    document.getElementById('goodsSelect').required = !isNew;
+    document.getElementById('newGoodsName').required = isNew;
+    document.getElementById('sellingPrice').required = isNew;
+    document.getElementById('mode-existing').style.background = isNew ? 'transparent' : 'var(--accent)';
+    document.getElementById('mode-existing').style.color = isNew ? 'var(--muted)' : '#fff';
+    document.getElementById('mode-existing').style.fontWeight = isNew ? 'normal' : '600';
+    document.getElementById('mode-new').style.background = isNew ? 'var(--accent)' : 'transparent';
+    document.getElementById('mode-new').style.color = isNew ? '#fff' : 'var(--muted)';
+    document.getElementById('mode-new').style.fontWeight = isNew ? '600' : 'normal';
+  }
+
   // ── グッズタブ ──
   function switchGoodsTab(tab) {
     const isPurchase = tab === 'purchase';

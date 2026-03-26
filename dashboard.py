@@ -644,28 +644,46 @@ async def goods_page(request: Request, goods_name: str = Query(default=None), us
 async def goods_purchase(
     request: Request,
     entry_date: str = Form(...),
-    goods_name: str = Form(...),
+    goods_name: str = Form(default=""),
     quantity: int = Form(...),
     unit_price: int = Form(...),
     description: str = Form(default=""),
+    is_new: str = Form(default=""),
+    new_goods_name: str = Form(default=""),
+    selling_price: int = Form(default=0),
     user: dict = Depends(auth_guard),
 ):
     from urllib.parse import quote
     if quantity <= 0 or unit_price < 0:
         msg = quote("数量は1以上、単価は0以上で入力してください")
         return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+    if is_new:
+        name = new_goods_name.strip()
+        if not name:
+            msg = quote("グッズ名を入力してください")
+            return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+        ok = await db.add_goods(name, selling_price)
+        if not ok:
+            msg = quote(f"「{name}」はすでに登録されています")
+            return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+        target_name = name
+    else:
+        if not goods_name:
+            msg = quote("グッズを選択してください")
+            return RedirectResponse(f"/?error_msg={msg}", status_code=303)
+        target_name = goods_name
     total = quantity * unit_price
     journal_id = await db.add_journal_entry(
         entry_date, "グッズ在庫", "現金",
         total,
-        description or f"グッズ仕入: {goods_name} {quantity}個",
+        description or f"グッズ仕入: {target_name} {quantity}個",
     )
     await db.record_goods_purchase(
-        goods_name=goods_name,
+        goods_name=target_name,
         quantity=quantity,
         unit_price=unit_price,
         entry_date=entry_date,
-        description=description or f"グッズ仕入: {goods_name} {quantity}個",
+        description=description or f"グッズ仕入: {target_name} {quantity}個",
         journal_entry_id=journal_id,
     )
     return RedirectResponse("/?goods_saved=purchased", status_code=303)
