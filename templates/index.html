@@ -104,7 +104,7 @@
         <select name="paid_by" required
           style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:14px;">
           {% for m in members %}
-          <option value="{{ m.name }}">{{ m.name }}</option>
+          <option value="{{ m }}">{{ m }}</option>
           {% endfor %}
         </select>
       </div>
